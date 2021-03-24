@@ -1,12 +1,12 @@
 ------------------------------------------
-ic3po: IC3 for Proving Protocol Properties
+IC3PO: IC3 for Proving Protocol Properties
 ------------------------------------------
-Copyright (c) 2020  Aman Goel and Karem Sakallah, University of Michigan. All rights reserved.
+Copyright (c) 2021  Aman Goel and Karem Sakallah, University of Michigan. All rights reserved.
 
-ic3po is available upon request for research and evaluation purposes only. 
+IC3PO is available for research and evaluation purposes only. 
 Send an email to amangoel@umich.edu or karem@umich.edu
-Any usage of ic3po needs to comply with the usage terms of the dependencies of ic3po detailed as follows.
-ic3po is provided as is, without any warranty.
+Any usage of IC3PO needs to comply with the usage terms of the dependencies of IC3PO detailed as follows.
+IC3PO is provided as is, without any warranty.
 ----------------
 
 

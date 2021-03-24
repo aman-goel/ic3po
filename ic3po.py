@@ -59,7 +59,7 @@ def getopts(header):
 
 header="""
 ---
-ic3po
+IC3PO
 ---
   IC3 for Proving Protocol Properties
   
@@ -69,8 +69,8 @@ ic3po
 """
 
 short_header="""------------------------------------------------------------------------
-ic3po: IC3 for Proving Protocol Properties
-copyright (c) 2020  Aman Goel and Karem Sakallah, University of Michigan
+IC3PO: IC3 for Proving Protocol Properties
+copyright (c) 2021  Aman Goel and Karem Sakallah, University of Michigan
 ------------------------------------------------------------------------
 """
 
