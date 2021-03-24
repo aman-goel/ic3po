@@ -1,7 +1,7 @@
-# IC3PO
-
 <img align="right" width="100" height="auto" src="logo.png">
 </img>
+
+# IC3PO
 
 **IC3** for **P**r**o**ving **P**r**o**tocol **P**r**o**perties
 
