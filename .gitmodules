@@ -1,0 +1,9 @@
+[submodule "pysmt"]
+	path = pysmt
+	url = https://github.com/aman-goel/pysmt
+[submodule "ivy"]
+	path = ivy
+	url = https://github.com/aman-goel/ivy
+[submodule "ivybench"]
+	path = ivybench
+	url = https://github.com/aman-goel/ivybench

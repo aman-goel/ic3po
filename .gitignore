@@ -1,0 +1,25 @@
+*/__pycache__/*
+*.pyc
+*.log
+*ivy*.smt2
+utils/test.vmt
+output/
+output/*
+*.pla
+*.smt2
+*.ys
+utils/solvers/*
+*tmp.txt
+ivybench/logs/
+ivybench/logs/*
+ivybench/final/*/logs/*
+*/logs/*
+*.log
+*/*.fuse_*
+*/*.csv
+xtras/fail*.log
+
+# But not these files
+!.gitignore
+!.travis/*
+!.travis.yml
