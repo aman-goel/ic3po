@@ -1,0 +1,61 @@
+# This workflow will install Python dependencies, run tests and lint with a single version of Python
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: ic3po (single test)
+on: 
+  workflow_dispatch:
+    inputs:
+      timeout:
+        description: timeout (in seconds)
+        default: 300
+        required: true
+      suite:
+        description: Benchmark suite
+        default: tla
+        required: true        
+      benchmark:
+        description: Benchmark name
+        default: TCommit
+        required: true        
+      args:
+        description: Additional arguments
+        default: ""
+        required: false
+
+jobs:
+  job1:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python 2.7
+      uses: actions/setup-python@v2
+      with:
+        python-version: 2.7
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        git submodule update --init --recursive
+        chmod +x .travis/build.sh
+        chmod +x ./.travis/deploy_bm.sh
+        ./.travis/build.sh
+    - name: Run benchmark ${{ github.event.inputs.benchmark }} in suite ${{ github.event.inputs.suite }} with args  ${{ github.event.inputs.args }}
+      run: |
+        ENVSEED=1 ENVTIMEOUT=${{ github.event.inputs.timeout }} ./.travis/deploy_bm.sh ${{ github.event.inputs.suite }} ${{ github.event.inputs.benchmark }} ${{ github.event.inputs.args }}
+    - name: Upload ic3po log
+      uses: actions/upload-artifact@v2
+      with:
+        name: ic3po.log
+        path: output/seed1/${{ github.event.inputs.suite }}_${{ github.event.inputs.benchmark }}/${{ github.event.inputs.benchmark }}/${{ github.event.inputs.benchmark }}.log
+      if: ${{ always() }}
+    - name: Upload ic3po stats
+      uses: actions/upload-artifact@v2
+      with:
+        name: stats.txt
+        path: output/seed1/${{ github.event.inputs.suite }}_${{ github.event.inputs.benchmark }}/stats.txt
+      if: ${{ always() }}
+    - name: Upload ic3po stats (detailed)
+      uses: actions/upload-artifact@v2
+      with:
+        name: detailed_stats.txt
+        path: output/seed1/${{ github.event.inputs.suite }}_${{ github.event.inputs.benchmark }}/${{ github.event.inputs.benchmark }}/${{ github.event.inputs.benchmark }}.results
+      if: ${{ always() }}
