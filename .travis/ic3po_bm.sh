@@ -18,7 +18,7 @@ mkdir -p $outPrefix
 
 BMPATH="ivybench"
 TOOL="ic3po"
-FAILLOG="fail-seed$SEED.log"
+FAILLOG="xtras/fail-seed$SEED.log"
 
 ARGMIN="2"
 ARGRANDOM="0"
