@@ -1554,8 +1554,12 @@ class PDR(object):
                         inv_set_l.add((label, cl))
                     
                     push_time()
-                    self.check_invariant(inv_set_l)
+                    nFailed = self.check_invariant(inv_set_l)
                     self.update_time_stat("time-inv-check-infinite" if (len(self.system._sort2fin) == 0) else "time-inv-check-finite", pop_time())
+                    
+                    if nFailed != 0:
+                        print("--> Error!")
+                        assert(0)
                         
                     print("--> The system is safe!")
                     return inv_set_l, None

@@ -392,12 +392,20 @@ def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
                     print("\t%s -> %s" % (pretty_serialize(k), pretty_print_set(v, mode=0)))
                 
                 ucubes2qv = {}
+                emptyIdx = 1
                 for qv, ucubes in qv2ucubes.items():
-                    ucubes_sorted = sorted(ucubes, key=str)
-                    uc = And(ucubes_sorted)
-                    if uc not in ucubes2qv:
-                        ucubes2qv[uc] = set()
-                    ucubes2qv[uc].add(qv)
+                    uIdx = emptyIdx
+                    uc = TRUE()
+                    if len(ucubes) == 0:
+                        emptyIdx += 1
+                    else:
+                        uIdx = 0
+                        ucubes_sorted = sorted(ucubes, key=str)
+                        uc = And(ucubes_sorted)
+                    k = (uIdx, uc)
+                    if k not in ucubes2qv:
+                        ucubes2qv[k] = set()
+                    ucubes2qv[k].add(qv)
                 print("ucubes2qv #%d" % len(ucubes2qv))
                 singles = []
                 multiples = []
@@ -406,7 +414,7 @@ def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
                         singles.append(k)
                     elif len(v) >= minSz:
                         multiples.append(k)
-                    print("\t%s -> %s" % (pretty_serialize(k), pretty_print_set(v, mode=0)))
+                    print("\t%s -> %s" % (pretty_serialize(k[1]), pretty_print_set(v, mode=0)))
 
                 print("(partition) #%d %s -> { " % (len(ucubes2qv), enumsort), end="")
                 for v in ucubes2qv.values():
@@ -432,7 +440,7 @@ def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
                     for cubes in qv2cubes.values():
                         for cube in cubes:
                             cubeSet2.discard(cube)
-                    for uc in ucubes2qv.keys():
+                    for _, uc in ucubes2qv.keys():
                         tmp_subs = {}
                         tmp_subs[uSymbol] = qvar[0]
                         uc = uc.simple_substitute(tmp_subs)
