@@ -47,19 +47,25 @@ def elapsed_time():
 def time_str():
     return "@ %5.0fs " % elapsed_time()
 
-def pretty_print_str(cl, mode=1):
+def pretty_print_str(cl, mode=0, reset=True):
     subs = {}
 
     qvars = cl.get_quantifier_variables()
     nameset = set()
     count = 0
+    nameSort = {}
     for v in qvars:
         name = str(v)
         suffix = name.rstrip('1234567890')
         name = name[len(suffix):]
         if len(name) != 0:
             vs = v.symbol_type()
-            n = str(vs)[0].upper() + name
+#             sname = str(vs).upper().split(':')[0]
+            sname = str(vs)[0].upper()
+            if sname not in nameSort:
+                nameSort[sname] = 0
+            nameSort[sname] += 1
+            n = sname + str(nameSort[sname])
             if n in nameset:
                 count += 1
                 n = n + "_" + str(count)
@@ -76,11 +82,12 @@ def pretty_print_str(cl, mode=1):
             if tmpName.endswith(SORT_SUFFIX):
                 name = tmpName[:-2]
         subs[v] = name
-
-#     return pretty_serialize(cl, mode=mode, subs=subs)
-    return pretty_serialize(cl, subs=subs)
+    if reset:
+        mode = 0
+    return pretty_serialize(cl, mode=mode, subs=subs)
+#     return pretty_serialize(cl, subs=subs)
     
-def pretty_print(cl, mode=1):
+def pretty_print(cl, mode=0):
     print(pretty_print_str(cl, mode))
 
 def pretty_print_inv_set(inv_set, comment=""):
@@ -89,15 +96,29 @@ def pretty_print_inv_set(inv_set, comment=""):
     for cl in inv_set:
         count += 1
         print("invariant [%d_ic3po]\t" % count, end='')
-        pretty_print(cl)
+        pretty_print(cl, 1)
     print("###\n")
     sys.stdout.flush()
 
+def formula_key(f):
+    fstr = str(f)
+    frels = f.get_free_variables()
+    frels2 = sorted(frels, key=str)
+    return (len(fstr), str(frels2), fstr)
+
+def label_key(label):
+    prefix = label.rstrip('1234567890')
+    suffix = label[len(prefix):]
+    if suffix.isdigit():
+        return (prefix, int(suffix))
+    else:
+        return (label, 0)
+
 def pretty_print_inv(inv_list, comment, suffix=""):
     print("### %s: #%d" % (comment, len(inv_list)))
-    for label, cl in inv_list:
-        print("invariant [%s%s]\t" % (label, suffix), end='')
-        pretty_print(cl)
+    for label, cl in sorted(inv_list, key=lambda v: label_key(v[0])):
+        print("invariant [ic3po_%s%s]\t" % (label, suffix), end='')
+        pretty_print(cl, 1)
     print("###\n")
     sys.stdout.flush()
 
@@ -105,7 +126,7 @@ def pretty_print_inv_file(invF, inv_list, comment="Proof certificate"):
     print("### %s: #%d" % (comment, len(inv_list)), file=invF)
     for label, cl in inv_list:
         print("invariant [ic3po_%s]\t" % label, end='', file=invF)
-        print(pretty_print_str(cl, 1), file=invF)
+        print(pretty_print_str(cl, mode=1, reset=False), file=invF)
     print("###", file=invF)
 
 #     def print_smt2(self, cl):
@@ -173,6 +194,14 @@ def flatten_and(formula):
         for arg in formula.args():
             for flat_arg in flatten_and(arg):
                 flat.add(flat_arg)
+    elif (formula.is_not()):
+        formulaNeg = formula.arg(0)
+        if formulaNeg.is_or():
+            for arg in formulaNeg.args():
+                for flat_arg in flatten_or(arg):
+                    flat.add(Not(flat_arg))
+        else:
+            flat.add(formula)
     else:
         flat.add(formula)
     return flat
