@@ -152,9 +152,18 @@ def main():
 	command += " -n %s" % opts.name
 	command += " " +  vmt_file
 	command += " >> " + log_file
-	s = subprocess.call("exec " + command, shell=True)
-	if (s != 0):
-		raise Exception("ic3po error: return code %d" % s)
+	s = subprocess.Popen("exec " + command, shell=True)
+	try:
+		s.wait()
+	except KeyboardInterrupt:
+		try:
+		   s.terminate()
+		except OSError:
+		   pass
+		s.wait()
+	retcode = s.poll()
+	if (retcode != 0):
+		raise Exception("ic3po error: return code %d" % retcode)
 		
 if __name__ == '__main__':
 	main()

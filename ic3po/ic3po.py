@@ -33,6 +33,9 @@ from z3.z3util import get_z3_version
 from pysmt.pretty_printer import pretty_serialize
 import common
 
+import yices_api
+import itertools
+
 os.environ["PYTHONHASHSEED"] = "0"
 
 class PDR(object):
@@ -51,6 +54,8 @@ class PDR(object):
         self.seed = common.gopts.seed
         eprint("\t(using z3 %s with seed %s)" % (get_z3_version(True), "random" if (self.random > 0) else str(self.seed)))
         print("\t(using z3 %s with seed %s)" % (get_z3_version(True), "random" if (self.random > 0) else str(self.seed)))
+        eprint("\t(using yices %s with seed %s)" % (yices_api.yices_version, "random" if (self.random > 0) else str(self.seed)))
+        print("\t(using yices %s with seed %s)" % (yices_api.yices_version, "random" if (self.random > 0) else str(self.seed)))
         self.init_stats()
         self.reset()
         self.debug = False
@@ -74,8 +79,8 @@ class PDR(object):
             solver = UnsatCoreSolver(name="z3", logic="UF", random_seed=self.solver_seed())
         else:
             if len(self.system._sort2fin) == len(self.system._sorts):
-#                 solver = UnsatCoreSolver(name="yices", random_seed=self.solver_seed())
-                solver = UnsatCoreSolver(name="z3", logic="UF", random_seed=self.solver_seed())
+                solver = UnsatCoreSolver(name="yices", logic="QF_UF", random_seed=self.solver_seed())
+#                 solver = UnsatCoreSolver(name="z3", logic="UF", random_seed=self.solver_seed())
                 if self.qf != 2:
                     solver.enable_qf()
             else:
@@ -91,6 +96,8 @@ class PDR(object):
         self.framesolver = []
         z3ctx = z3.main_ctx()
         del z3ctx
+        if yices_api.yices_is_inited():
+            yices_api.yices_reset()
         self.solver = self.init_solver(self.qf)
         self.qesolver = QuantifierEliminator(name='scalarshannon')
         self._faxioms = []
@@ -112,6 +119,7 @@ class PDR(object):
 #         print("z3.smt.mbqi = %s" % z3.get_param('smt.mbqi'))
 #         print("z3.smt.core.minimize = %s" % z3.get_param('smt.core.minimize'))
 #         print('PYTHON HASH SEED IS', os.environ['PYTHONHASHSEED'])
+        self.qf = common.gopts.qf
     
     def solver_seed(self):
         return self.seed
@@ -432,7 +440,7 @@ class PDR(object):
         antecedent = dict()
         
 #         print(cubeSet)
-        formulae = [cubeSym]
+        formulae = [And(cubeSym)]
         
         sym2ant = {}
         ant2sym = {}
@@ -942,7 +950,7 @@ class PDR(object):
             if c.node_type() == op.EQUALS:
                 lhs = c.arg(0)
                 rhs = c.arg(1)
-                if not rhs.is_symbol():
+                if (not rhs.is_symbol()) or (lhs in qvars):
                     lhs, rhs = rhs, lhs
                 if rhs.is_symbol and rhs in qvars:
                     if rhs not in eqMap:
@@ -2117,6 +2125,13 @@ class PDR(object):
 #                     else:
 #                         print("Formula not found: %s" % formula)
 #                         assert(0)
+#         else:
+#             if formula in self.cache_qu:
+#                 return self.cache_qu[formula]
+#             else:
+#                 not_formula = Not(formula)
+#                 if not_formula in self.cache_qu:
+#                     return Not(self.cache_qu[not_formula])          
         return formula
     
     def get_formula_qf(self, formula):
@@ -2157,6 +2172,10 @@ class PDR(object):
                 self.cache_qf[formula] = qf_formula
                 self.cache_qu[qf_formula] = formula
                 return qf_formula
+#         else:
+#             formula_flat = self.system.replaceDefinitions(formula)
+#             self.cache_qu[formula_flat] = formula
+#             return formula_flat
         return formula
     
     def get_formulae_qf(self, formula):
@@ -2188,6 +2207,8 @@ class PDR(object):
     
     def print_query(self, solver, fname, prefix, formulae, force):
         if force or (self.verbose > 9):
+            if not isinstance(solver, pysmt.solvers.z3.Z3Solver):
+                return
             fname = "%s/%s.smt2" % (common.gopts.out, fname)
             f = open(fname, "w+")
             if prefix != "":
