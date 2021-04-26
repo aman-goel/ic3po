@@ -3059,6 +3059,7 @@ def backwardReach(fname, system=None):
     
     print_sizes1(p, "finite-size-init")
     print_stat("opt-antecedent", "true" if common.gopts.opt > 0 else "false")
+    print_num_state_bits1(p, "total-state-bits-init")
 
     if len(p.system.curr._infers) != 0:
         print()
@@ -3124,11 +3125,13 @@ def backwardReach(fname, system=None):
                 for label, cl in inv_optional_fin:
                     inv_set_optional_l.add((label, cl))
                 
+        last_tsb = p.system.get_num_state_bits()
         p.print_stats()
         if inv_set_l == None:
             result = "unsafe"
             eprint(time_str(), "Property violated.")
             print_sizes1(p, "finite-size-final")
+            print_num_state_bits2(p, "total-state-bits-final", last_tsb)
             break
         
         num_uc_new = p.stat["unsat-core"]
@@ -3281,6 +3284,7 @@ def backwardReach(fname, system=None):
             for s_fin, s_inf in p.system._fin2sort.items():
                 eprint("\t|%s| = %s" % (s_inf, len(p.system._enumsorts[s_fin])))
             print_sizes2(p, "finite-size-final")
+            print_num_state_bits2(p, "total-state-bits-final", last_tsb)
 
             inv_full_inf = []
             for label, cl in inv_pruned_inf_l:

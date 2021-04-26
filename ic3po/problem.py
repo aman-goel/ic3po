@@ -1084,4 +1084,12 @@ def print_sizes2(self, key):
                 break
         val += "|%s|=%s;" % (s_inf, ("inf" if sz == 0 else str(sz)))
     print_stat(key, val)
-    
+            
+def print_num_state_bits1(self, key):
+    tsb = self.system.get_num_state_bits()
+    val = "%s" % ("inf" if tsb <= 0 else str(tsb))
+    print_stat(key, val)
+            
+def print_num_state_bits2(self, key, tsb):
+    val = "%s" % ("inf" if tsb <= 0 else str(tsb))
+    print_stat(key, val)

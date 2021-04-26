@@ -48,6 +48,7 @@ class System():
         self._helpers = dict()
         self._infers = dict()
         self._definitions = dict()
+        self._definitionMap = dict()
     
     def copy(self, rhs):
         self._init = rhs._init
@@ -69,6 +70,7 @@ class System():
         self._helpers = rhs._helpers
         self._infers = rhs._infers
         self._definitions = rhs._definitions
+        self._definitionMap = rhs._definitionMap
         
     def add_helper(self, formula, name):
         self._helpers[formula] = "user_" + name
@@ -434,6 +436,10 @@ class System():
         res.append(str(len(self._definitions)) + "\n")
         for k, v in self._definitions.items():
             res.append("\t%s := %s\n\t\twith variables %s\n" % (str(k), str(v), v.get_free_variables()))
+        res.append("\nDefinition Map #")
+        res.append(str(len(self._definitionMap)) + "\n")
+        for k, v in self._definitionMap.items():
+            res.append("\t%s := %s\n\t\twith variables %s\n" % (str(k), str(v[0]), v[-1]))
         res.append("\nTrel:\n%s\n" % (self._trel.serialize()))
         res.append("-----------------------------------------------------------------")
         return "".join(res)
@@ -731,6 +737,13 @@ class TransitionSystem(SmtLibParser):
         for l, r in self.orig._definitions.items():
             self.curr._definitions[l] = r.fsubstitute()
 
+        self.curr._definitionMap = dict()
+        for l, r in self.orig._definitionMap.items():
+            argsNew = []
+            for a in r[-1]:
+                argsNew.append(a.fsubstitute())
+            self.curr._definitionMap[l.fsubstitute()] = [r[0].fsubstitute(), r[1].fsubstitute(), argsNew]
+
         self.syntax.substitute(self.curr)
         self._idx += 1
         
@@ -814,6 +827,13 @@ class TransitionSystem(SmtLibParser):
         self.curr._definitions = dict()
         for l, r in self.tmp._definitions.items():
             self.curr._definitions[l] = r.fsubstitute()
+
+        self.curr._definitionMap = dict()
+        for l, r in self.tmp._definitionMap.items():
+            argsNew = []
+            for a in r[-1]:
+                argsNew.append(a.fsubstitute())
+            self.curr._definitionMap[l.fsubstitute()] = [r[0].fsubstitute(), r[1].fsubstitute(), argsNew]
 
         self.syntax.substitute(self.curr)
 
@@ -909,12 +929,11 @@ class TransitionSystem(SmtLibParser):
     
     def replaceDefinitions(self, formula, mode=0):
 #        print("orig: %s" % pretty_serialize(formula))
-        f = substituteDefinitions(formula, self._definitionMap, mode)
+        f = substituteDefinitions(formula, self.curr._definitionMap, mode)
 #        print("new : %s" % pretty_serialize(f))
         return f
     
     def stratify(self):
-        self.strat.set_definitionMap(self._definitionMap)
         print("\nstratifying state variables:")
         for f in self.orig._states:
             ft = f.symbol_type()
@@ -1088,7 +1107,7 @@ class TransitionSystem(SmtLibParser):
 #                 print("lhs: %s" % lhs)
 #                 print("rhs: %s" % rhs)
 #                 assert(0)
-                self._definitionMap[k] = [rel, args, lhs, rhs]
+                self.orig._definitionMap[rel] = [rhs, lhs, args]
             
             for x in useMap.keys():
                 self.set_dependency_height(x, useMap)
@@ -1296,6 +1315,48 @@ class TransitionSystem(SmtLibParser):
 #                 eprint("\t|%s| = %s" % (tt, len(self._enumsorts[vals])))
             pass
             
+    def get_num_state_bits(self):
+        val = 0
+        for s in self.curr._states:
+            if s in self.curr._le:
+#                 eprint("skipping " + str(s))
+                continue
+            if str(s).startswith("member:"):
+#                 eprint("skipping " + str(s))
+                continue
+            if s in self.curr._definitionMap:
+#                 eprint("skipping " + str(s))
+                continue
+            sz = self.get_num_state_bits_symbol(s)
+            if sz <= 0:
+                return -1
+            val += sz
+#         eprint("tsb=%d" % val)
+        return val
+            
+    def get_num_state_bits_symbol(self, s):
+        s_type = s.symbol_type()
+#         eprint(str(s) + " of type %s\n" % s_type)
+        val = 1
+        rett = s_type
+        if s_type.is_function_type():
+            rett = s_type.return_type
+            for paramt in s_type.param_types:
+                if paramt in self._enumsorts:
+                    sz = len(self._enumsorts[paramt])
+                    val *= sz
+#                     eprint("  arg |%s|=%d" % (paramt, sz))
+                else:
+                    return -1
+        if not rett.is_bool_type():
+            if rett in self._enumsorts:
+                sz = len(self._enumsorts[rett])
+                val *= sz
+#                 eprint("  ret |%s|=%d" % (rett, sz))
+            else:
+                return -1
+#         eprint("symbol |%s|=%d" % (str(s), val))
+        return val
                         
 # Time to try out the parser !!!
 
