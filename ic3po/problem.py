@@ -398,6 +398,9 @@ def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
                     uc = TRUE()
                     if len(ucubes) == 0:
                         emptyIdx += 1
+                    elif qv in self.system.curr._states:
+                        emptyIdx += 1
+                        print("\t(creating separate cell for %s)" % pretty_serialize(qv))
                     else:
                         uIdx = 0
                         ucubes_sorted = sorted(ucubes, key=str)
