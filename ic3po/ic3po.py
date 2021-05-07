@@ -37,6 +37,7 @@ import yices_api
 import itertools
 
 os.environ["PYTHONHASHSEED"] = "0"
+iterationCount = 0
 
 class PDR(object):
     def __init__(self, system):
@@ -1038,7 +1039,7 @@ class PDR(object):
             isGlobal = self.check_if_global(core_formula, corepre_formula)
             print(time_str(), "is global clause? %s" % ("Yes" if isGlobal else "No"))
             if isGlobal:
-                label = "global" + str(len(self.globals)+1)
+                label = "global" + str(iterationCount) + "_" + str(len(self.globals)+1)
                 self.globals[Not(corepre)] = label
                 self.learn_cube(len(self.frames) - 1, corepre, corepre_formula)
                 added += 1
@@ -2107,7 +2108,28 @@ class PDR(object):
 #         print("%s -> %s" % (f, value))
         eq = EqualsOrIff(f, value)
         return eq
-
+    
+    def get_state_values(self, s, s_type, model, sorts, conditions, args, idx):
+        if (idx == len(s_type.param_types)):
+            conditions.append(self.get_relation_value(s, args, model))
+        else:
+            i_values = sorts[s_type.param_types[idx]]
+            for i in i_values:
+                args.append(i)
+                self.get_state_values(s, s_type, model, sorts, conditions, args, idx+1)
+                args.pop()
+    
+    def get_predicate_values(self, s, s_type, model, sorts, conditions, rhs, a, subs, idx):
+        if (idx == len(s_type.param_types)):
+            rhsNew = rhs.simple_substitute(subs)
+            conditions.append(self.get_predicate_value(rhsNew, model))
+        else:
+            i_values = sorts[s_type.param_types[idx]]
+            for i in i_values:
+                subs[a[idx]] = i
+                self.get_predicate_values(s, s_type, model, sorts, conditions, rhs, a, subs, idx+1)
+                del subs[a[idx]]
+    
     def get_formula_qu(self, formula):
         if self.qf >= 2:
             if (len(self.system._fin2sort) == 0 
@@ -2294,35 +2316,37 @@ class PDR(object):
                     rhsNew = rhs.simple_substitute(subs)
                     conditions.append(self.get_predicate_value(rhsNew, model))
                 else:
-                    i_values = sorts[s_type.param_types[0]]
-                    for i in i_values:
-                        subs[a[0]] = i
-                        if (len(s_type.param_types) <= 1):
-                            rhsNew = rhs.simple_substitute(subs)
-                            conditions.append(self.get_predicate_value(rhsNew, model))
-                            continue
-                        j_values = sorts[s_type.param_types[1]]
-                        for j in j_values:
-                            subs[a[1]] = j
-                            if (len(s_type.param_types) <= 2):
-                                rhsNew = rhs.simple_substitute(subs)
-                                conditions.append(self.get_predicate_value(rhsNew, model))
-                                continue
-                            k_values = sorts[s_type.param_types[2]]
-                            for k in k_values:
-                                subs[a[2]] = k
-                                if (len(s_type.param_types) <= 3):
-                                    rhsNew = rhs.simple_substitute(subs)
-                                    conditions.append(self.get_predicate_value(rhsNew, model))
-                                    continue
-                                l_values = sorts[s_type.param_types[3]]
-                                for l in l_values:
-                                    subs[a[3]] = l
-                                    rhsNew = rhs.simple_substitute(subs)
-                                    conditions.append(self.get_predicate_value(rhsNew, model))
-                                    if (len(s_type.param_types) > 3):
-                                        print("Found a case with more than 5 arguments to a symbol.")
-                                        assert(0)
+                    subs = {}
+                    self.get_predicate_values(s, s_type, model, sorts, conditions, rhs, a, subs, 0)
+#                     i_values = sorts[s_type.param_types[0]]
+#                     for i in i_values:
+#                         subs[a[0]] = i
+#                         if (len(s_type.param_types) <= 1):
+#                             rhsNew = rhs.simple_substitute(subs)
+#                             conditions.append(self.get_predicate_value(rhsNew, model))
+#                             continue
+#                         j_values = sorts[s_type.param_types[1]]
+#                         for j in j_values:
+#                             subs[a[1]] = j
+#                             if (len(s_type.param_types) <= 2):
+#                                 rhsNew = rhs.simple_substitute(subs)
+#                                 conditions.append(self.get_predicate_value(rhsNew, model))
+#                                 continue
+#                             k_values = sorts[s_type.param_types[2]]
+#                             for k in k_values:
+#                                 subs[a[2]] = k
+#                                 if (len(s_type.param_types) <= 3):
+#                                     rhsNew = rhs.simple_substitute(subs)
+#                                     conditions.append(self.get_predicate_value(rhsNew, model))
+#                                     continue
+#                                 l_values = sorts[s_type.param_types[3]]
+#                                 for l in l_values:
+#                                     subs[a[3]] = l
+#                                     rhsNew = rhs.simple_substitute(subs)
+#                                     conditions.append(self.get_predicate_value(rhsNew, model))
+#                                     if (len(s_type.param_types) > 3):
+#                                         print("Found a case with more than 5 arguments to a symbol.")
+#                                         assert(0)
 #             print(conditions)
 #             assert(0)
 
@@ -2331,46 +2355,48 @@ class PDR(object):
                 s_type = s.symbol_type()
 
                 if s_type.is_function_type():
-                    i_values = sorts[s_type.param_types[0]]
-                    for i in i_values:
-                        if (len(s_type.param_types) == 1):
-                            args = [i]
-                            conditions.append(self.get_relation_value(s, args, model))
-                        elif (len(s_type.param_types) == 2):
-                            j_values = sorts[s_type.param_types[1]]
-                            for j in j_values:
-                                args = [i, j]
-                                conditions.append(self.get_relation_value(s, args, model))
-                        elif (len(s_type.param_types) == 3):
-                            j_values = sorts[s_type.param_types[1]]
-                            for j in j_values:
-                                k_values = sorts[s_type.param_types[2]]
-                                for k in k_values:
-                                    args = [i, j, k]
-                                    conditions.append(self.get_relation_value(s, args, model))
-                        elif (len(s_type.param_types) == 4):
-                            j_values = sorts[s_type.param_types[1]]
-                            for j in j_values:
-                                k_values = sorts[s_type.param_types[2]]
-                                for k in k_values:
-                                    l_values = sorts[s_type.param_types[3]]
-                                    for l in l_values:
-                                        args = [i, j, k, l]
-                                        conditions.append(self.get_relation_value(s, args, model))
-                        elif (len(s_type.param_types) == 5):
-                            j_values = sorts[s_type.param_types[1]]
-                            for j in j_values:
-                                k_values = sorts[s_type.param_types[2]]
-                                for k in k_values:
-                                    l_values = sorts[s_type.param_types[3]]
-                                    for l in l_values:
-                                        m_values = sorts[s_type.param_types[4]]
-                                        for m in m_values:
-                                            args = [i, j, k, l, m]
-                                            conditions.append(self.get_relation_value(s, args, model))
-                        else:
-                            print("Found a case with more than 5 arguments to a symbol.")
-                            assert(0)
+                    args = []
+                    self.get_state_values(s, s_type, model, sorts, conditions, args, 0)
+#                     i_values = sorts[s_type.param_types[0]]
+#                     for i in i_values:
+#                         if (len(s_type.param_types) == 1):
+#                             args = [i]
+#                             conditions.append(self.get_relation_value(s, args, model))
+#                         elif (len(s_type.param_types) == 2):
+#                             j_values = sorts[s_type.param_types[1]]
+#                             for j in j_values:
+#                                 args = [i, j]
+#                                 conditions.append(self.get_relation_value(s, args, model))
+#                         elif (len(s_type.param_types) == 3):
+#                             j_values = sorts[s_type.param_types[1]]
+#                             for j in j_values:
+#                                 k_values = sorts[s_type.param_types[2]]
+#                                 for k in k_values:
+#                                     args = [i, j, k]
+#                                     conditions.append(self.get_relation_value(s, args, model))
+#                         elif (len(s_type.param_types) == 4):
+#                             j_values = sorts[s_type.param_types[1]]
+#                             for j in j_values:
+#                                 k_values = sorts[s_type.param_types[2]]
+#                                 for k in k_values:
+#                                     l_values = sorts[s_type.param_types[3]]
+#                                     for l in l_values:
+#                                         args = [i, j, k, l]
+#                                         conditions.append(self.get_relation_value(s, args, model))
+#                         elif (len(s_type.param_types) == 5):
+#                             j_values = sorts[s_type.param_types[1]]
+#                             for j in j_values:
+#                                 k_values = sorts[s_type.param_types[2]]
+#                                 for k in k_values:
+#                                     l_values = sorts[s_type.param_types[3]]
+#                                     for l in l_values:
+#                                         m_values = sorts[s_type.param_types[4]]
+#                                         for m in m_values:
+#                                             args = [i, j, k, l, m]
+#                                             conditions.append(self.get_relation_value(s, args, model))
+#                         else:
+#                             print("Found a case with more than 5 arguments to a symbol.")
+#                             assert(0)
                 else:
                     f = Function(s, [])
                     if f.is_symbol() and f in self.system.curr._globals:
@@ -2386,6 +2412,9 @@ class PDR(object):
                             conditions.append(eq)
                     else:
                         conditions.append(eq)
+#             for c in conditions:
+#                 print("%s" % pretty_serialize(c))
+#             assert(0)
 
             ivars = []
             ivarMap = {}
@@ -2479,46 +2508,48 @@ class PDR(object):
             s_type = s.symbol_type()
 
             if s_type.is_function_type():
-                i_values = sorts[s_type.param_types[0]]
-                for i in i_values:
-                    if (len(s_type.param_types) == 1):
-                        args = [i]
-                        conditions.append(self.get_relation_value(s, args, model))
-                    elif (len(s_type.param_types) == 2):
-                        j_values = sorts[s_type.param_types[1]]
-                        for j in j_values:
-                            args = [i, j]
-                            conditions.append(self.get_relation_value(s, args, model))
-                    elif (len(s_type.param_types) == 3):
-                        j_values = sorts[s_type.param_types[1]]
-                        for j in j_values:
-                            k_values = sorts[s_type.param_types[2]]
-                            for k in k_values:
-                                args = [i, j, k]
-                                conditions.append(self.get_relation_value(s, args, model))
-                    elif (len(s_type.param_types) == 4):
-                        j_values = sorts[s_type.param_types[1]]
-                        for j in j_values:
-                            k_values = sorts[s_type.param_types[2]]
-                            for k in k_values:
-                                l_values = sorts[s_type.param_types[3]]
-                                for l in l_values:
-                                    args = [i, j, k, l]
-                                    conditions.append(self.get_relation_value(s, args, model))
-                    elif (len(s_type.param_types) == 5):
-                        j_values = sorts[s_type.param_types[1]]
-                        for j in j_values:
-                            k_values = sorts[s_type.param_types[2]]
-                            for k in k_values:
-                                l_values = sorts[s_type.param_types[3]]
-                                for l in l_values:
-                                    m_values = sorts[s_type.param_types[4]]
-                                    for m in m_values:
-                                        args = [i, j, k, l, m]
-                                        conditions.append(self.get_relation_value(s, args, model))
-                    else:
-                        print("Found a case with more than 5 arguments to a symbol.")
-                        assert(0)
+                args = []
+                self.get_state_values(s, s_type, model, sorts, conditions, args, 0)
+#                 i_values = sorts[s_type.param_types[0]]
+#                 for i in i_values:
+#                     if (len(s_type.param_types) == 1):
+#                         args = [i]
+#                         conditions.append(self.get_relation_value(s, args, model))
+#                     elif (len(s_type.param_types) == 2):
+#                         j_values = sorts[s_type.param_types[1]]
+#                         for j in j_values:
+#                             args = [i, j]
+#                             conditions.append(self.get_relation_value(s, args, model))
+#                     elif (len(s_type.param_types) == 3):
+#                         j_values = sorts[s_type.param_types[1]]
+#                         for j in j_values:
+#                             k_values = sorts[s_type.param_types[2]]
+#                             for k in k_values:
+#                                 args = [i, j, k]
+#                                 conditions.append(self.get_relation_value(s, args, model))
+#                     elif (len(s_type.param_types) == 4):
+#                         j_values = sorts[s_type.param_types[1]]
+#                         for j in j_values:
+#                             k_values = sorts[s_type.param_types[2]]
+#                             for k in k_values:
+#                                 l_values = sorts[s_type.param_types[3]]
+#                                 for l in l_values:
+#                                     args = [i, j, k, l]
+#                                     conditions.append(self.get_relation_value(s, args, model))
+#                     elif (len(s_type.param_types) == 5):
+#                         j_values = sorts[s_type.param_types[1]]
+#                         for j in j_values:
+#                             k_values = sorts[s_type.param_types[2]]
+#                             for k in k_values:
+#                                 l_values = sorts[s_type.param_types[3]]
+#                                 for l in l_values:
+#                                     m_values = sorts[s_type.param_types[4]]
+#                                     for m in m_values:
+#                                         args = [i, j, k, l, m]
+#                                         conditions.append(self.get_relation_value(s, args, model))
+#                     else:
+#                         print("Found a case with more than 5 arguments to a symbol.")
+#                         assert(0)
             else:
                 f = Function(s, [])
                 
@@ -2878,7 +2909,7 @@ class PDR(object):
                     iNew = i
                     if isGlobal:
                         iNew = len(self.frames) - 1
-                        label = "global" + str(len(self.globals)+1)
+                        label = "global" + str(iterationCount) + "_" + str(len(self.globals)+1)
                         self.globals[Not(corepre)] = label
     #                     assert(0)
 #                     if fancy:
@@ -3039,7 +3070,7 @@ class PDR(object):
         return inv_required, inv_optional
 
 def backwardReach(fname, system=None):
-    global start_time
+    global start_time, iterationCount
     parseSystem = system == None
     if parseSystem:
         utils.start_time = time.time()
@@ -3070,11 +3101,10 @@ def backwardReach(fname, system=None):
     
     helpers = set()
     done = False
-    count = 0
     result = "unknown"
     num_uc_prev = -1    
     while not done:
-        count += 1
+        iterationCount += 1
         inv_set_l = None
         cex = None
         forceMinimize = False
@@ -3376,7 +3406,7 @@ def backwardReach(fname, system=None):
             eprint(time_str(), "updr failed. Property unknown. Giveup.")
             print(time_str(), "updr failed. Property unknown. Giveup.")
             break
-        if count > 50:
+        if iterationCount > 50:
             done = True
             eprint(time_str(), "Too many iterations. Property unknown. Giveup.")
             print(time_str(), "Too many iterations. Property unknown. Giveup.")
@@ -3402,7 +3432,7 @@ def backwardReach(fname, system=None):
             if common.gopts.verbosity > 0:
                 eprint(time_str(), "(unbounded checks failed due to base size being too small)")
                 print(time_str(), "(unbounded checks failed due to base size being too small)")
-            if (count == 1) and (len(long_clauses) != 0):
+            if (iterationCount == 1) and (len(long_clauses) != 0):
                 if common.gopts.verbosity > 0:
                     eprint(time_str(), "(cleaning up clauses too specific to current size)")
                     print(time_str(), "(cleaning up clauses too specific to current size)")
@@ -3443,7 +3473,7 @@ def backwardReach(fname, system=None):
         
         sys.stdout.flush()
         eprint()
-        eprint("Finite sorts (step %d): #%d" % (count, len(p.system._sort2fin)))
+        eprint("Finite sorts (step %d): #%d" % (iterationCount, len(p.system._sort2fin)))
         for tt, vals in p.system._sort2fin.items():
             eprint("\t|%s| = %s" % (tt, len(p.system._enumsorts[vals])))
 
