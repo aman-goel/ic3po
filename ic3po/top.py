@@ -31,6 +31,7 @@ DEFAULT_WIRES=1
 DEFAULT_VERBOSITY=0
 DEFAULT_FINV=0
 DEFAULT_SIZE="default"
+DEFAULT_RANGEBOOST=0
 
 header="""
 ---
@@ -65,6 +66,7 @@ def getopts(header):
     p.add_argument('--init', help='initial size (use -1 to use vmt size) (default: %r)' % DEFAULT_INITSZ, type=int, default=DEFAULT_INITSZ)
     p.add_argument('--finv', help='use 1 to exit after printing the finite invariant for safe property (default: %r)' % DEFAULT_FINV, type=int, default=DEFAULT_FINV)
     p.add_argument('--size', help='finite size (, separated)', type=str, default=DEFAULT_SIZE)
+    p.add_argument('--rb', help='use 1 to enable RangeBoost (default: %r)' % DEFAULT_RANGEBOOST, type=int, default=DEFAULT_RANGEBOOST)
     p.add_argument('-v', '--verbosity', help='verbosity level (default: %r)' % DEFAULT_VERBOSITY, type=int, default=DEFAULT_VERBOSITY)
     args, leftovers = p.parse_known_args()
     return args, p.parse_args()

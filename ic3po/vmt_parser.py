@@ -514,22 +514,6 @@ class TransitionSystem(SmtLibParser):
         self.firste = None
         self.le = None
         res = []
-        for g in self.curr._globals:
-            gstr = pretty_print_str(g)
-            if gstr == "zero" or gstr == "negone":
-                gt = g.symbol_type()
-                assert(gt in self._enumsorts)
-                domain = self._enumsorts[gt]
-                eq = EqualsOrIff(g, domain[0])
-                res.append(eq)
-                self.zero = (domain[0], g)
-            elif gstr == "firste":
-                gt = g.symbol_type()
-                assert(gt in self._enumsorts)
-                domain = self._enumsorts[gt]
-                eq = EqualsOrIff(g, domain[1])
-                res.append(eq)
-                self.firste = (domain[1], g)
                 
         for pre in self.curr._le:
             pret = pre.symbol_type()
@@ -557,6 +541,26 @@ class TransitionSystem(SmtLibParser):
                         else:
                             assert(0)
                             
+        for g in self.curr._globals:
+            gt = g.symbol_type()
+            gstr = pretty_print_str(g)
+            if gt not in self._ordered_sorts:
+                continue
+            if gstr == "zero" or gstr == "negone":
+                gt = g.symbol_type()
+                assert(gt in self._enumsorts)
+                domain = self._enumsorts[gt]
+                eq = EqualsOrIff(g, domain[0])
+                res.append(eq)
+                self.zero = (domain[0], g)
+            elif gstr == "firste":
+                gt = g.symbol_type()
+                assert(gt in self._enumsorts)
+                domain = self._enumsorts[gt]
+                eq = EqualsOrIff(g, domain[1])
+                res.append(eq)
+                self.firste = (domain[1], g)
+                
         if len(res) == 0:
             return TRUE()
         else:
@@ -570,29 +574,7 @@ class TransitionSystem(SmtLibParser):
     def get_ordered_le(self):
         self.reset_ordered_sort()
         res = []
-        for g in self.curr._globals:
-            gstr = pretty_print_str(g)
-            print(gstr)
-            if gstr == "zero" or gstr == "negone":
-                gt = g.symbol_type()
-                if gt in self._enumsorts:
-                    self._ordered_min[gt] = g
-                    assert(gt in self._enumsorts)
-                    domain = self._enumsorts[gt]
-                    eq = EqualsOrIff(g, domain[0])
-                    res.append(eq)
-            elif gstr == "max":
-                gt = g.symbol_type()
-                if gt in self._enumsorts:
-                    self._ordered_max[gt] = g
-                    assert(gt in self._enumsorts)
-                    domain = self._enumsorts[gt]
-                    eq = EqualsOrIff(g, domain[-1])
-                    res.append(eq)
-            elif gstr == "firste":
-                gt = g.symbol_type()
-                if gt in self._enumsorts:
-                    self._ordered_first[gt] = g
+        
         for pre in self.curr._le:
             pret = pre.symbol_type()
             orderedt = pret.param_types[0]
@@ -621,6 +603,33 @@ class TransitionSystem(SmtLibParser):
 #                     arg2 = domain[i-1]
 #                     rel = Function(pre, [arg1, arg2])
 #                     res.append(Not(rel))
+
+        for g in self.curr._globals:
+            gt = g.symbol_type()
+            if gt not in self._ordered_sorts:
+                continue
+            gstr = pretty_print_str(g)
+            print(gstr)
+            if gstr == "zero" or gstr == "negone":
+                gt = g.symbol_type()
+                if gt in self._enumsorts:
+                    self._ordered_min[gt] = g
+                    assert(gt in self._enumsorts)
+                    domain = self._enumsorts[gt]
+                    eq = EqualsOrIff(g, domain[0])
+                    res.append(eq)
+            elif gstr == "max":
+                gt = g.symbol_type()
+                if gt in self._enumsorts:
+                    self._ordered_max[gt] = g
+                    assert(gt in self._enumsorts)
+                    domain = self._enumsorts[gt]
+                    eq = EqualsOrIff(g, domain[-1])
+                    res.append(eq)
+            elif gstr == "firste":
+                gt = g.symbol_type()
+                if gt in self._enumsorts:
+                    self._ordered_first[gt] = g
                     
         if len(res) == 0:
             return TRUE()
@@ -654,7 +663,9 @@ class TransitionSystem(SmtLibParser):
                 
                 qMap = {}
 
-                if (len(domainA) == 2) and (len(domainQ) == 1):
+                if (len(domainA) == 1) and (len(domainQ) == 1):
+                    qMap[0] = set([0])
+                elif (len(domainA) == 2) and (len(domainQ) == 1):
                     qMap[0] = set([0, 1])
                 elif (len(domainA) == 3) and (len(domainQ) == 3):
                     qMap[0] = set([0, 1])
@@ -693,6 +704,7 @@ class TransitionSystem(SmtLibParser):
                     qMap[13] = set([1, 3, 4, 5])
                     qMap[14] = set([2, 3, 4, 5])
                 else:
+                    print("Sort dependency mismatch: check size relation between %s and %s" % (str(tA), str(tQ)))
                     assert(0)
                 
                 self._quorums_symbols.add(pre)

@@ -41,7 +41,7 @@ IC3PO creates a directory ```<output-path>/<test-name>``` which contains results
 └── <test-name>
     ├── <test-name>.ivy		[input Ivy file]
     ├── <test-name>.vmt		[input converted to SMT-LIB compatible VMT file]
-    ├── bar.inv			[unbounded inductive invariant proof (if proved safe)]
+    ├── bar.inv			[unbounded inductive invariant (if proved safe)]
     ├── <test-name>.results	[statistics file]
     └── <test-name>.log		[IC3PO log]
 ````

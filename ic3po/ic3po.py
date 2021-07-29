@@ -81,12 +81,13 @@ class PDR(object):
         if True:
             self.eval_wires = True
 #             self.exp = True
-            self.ordered = "partial"
-            self.boost_ordered_en = True
             self.quorums = "symmetric"
             self.boost_quorums_en = True
 #             self.boosting = "none"
 #             self.allow_inputs_in_cube = True
+        if common.gopts.rb == 1:
+            self.ordered = "partial"
+            self.boost_ordered_en = True
     
     def init_solver(self, qf):
         if qf == 0:
