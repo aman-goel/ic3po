@@ -41,9 +41,9 @@ IC3PO creates a directory ```<output-path>/<test-name>``` which contains results
 └── <test-name>
     ├── <test-name>.ivy		[input Ivy file]
     ├── <test-name>.vmt		[input converted to SMT-LIB compatible VMT file]
-    ├── bar.inv				[unbounded inductive invariant proof (if property is proved safe)]
-    ├── <test-name>.results		[statistics file]
-    └── <test-name>.log			[IC3PO log]
+    ├── bar.inv			[unbounded inductive invariant proof (if proved safe)]
+    ├── <test-name>.results	[statistics file]
+    └── <test-name>.log		[IC3PO log]
 ````
 As a quick summary relating to the run, IC3PO produces certain key information as output.
 	For example, running ```python2 ic3po.py -o foo -n bar ivybench/ex/ivy/toy_consensus.ivy --size node=3,quorum=3,value=3``` produces the following output:
