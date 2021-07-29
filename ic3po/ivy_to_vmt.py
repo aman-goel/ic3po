@@ -76,11 +76,17 @@ class print_module_vmt():
             print("sig.interp: %s" % str(self.mod.sig.interp))
             assert(0)
 
-        if len(self.mod.definitions) != 0:
-#             print("definitions: %s" % str(self.mod.definitions))
-            for defn in self.mod.definitions:
+        for i in range(len(self.mod.updates)):
+            if type(self.mod.updates[i]) == ia.DerivedUpdate:
+                defn = self.mod.updates[i].defn
+#                 print("definitions: %s" % str(defn))
                 self.definitions.add(defn)
             self.mod.definitions = []
+#         if len(self.mod.definitions) != 0:
+#             print("definitions: %s" % str(self.mod.definitions))
+#             for defn in self.mod.definitions:
+#                 self.definitions.add(defn)
+#             self.mod.definitions = []
             
         with self.mod.theory_context():
             self.process_sig()
@@ -97,36 +103,36 @@ class print_module_vmt():
         global outF, outFile
         outF = open(outFile, 'w')
         
-        for s in self.sorts.keys():
+        for s in sorted(self.sorts.keys(), key=lambda v: str(v)):
             fprint(self.str[str(s)])
         fprint("")
-        for s, v in self.sorts.iteritems():
+        for s, v in sorted(self.sorts.iteritems(), key=lambda v: str(v)):
             self.print_sort_size(str(s), v)
         fprint("")
-        for pre in self.pre:
+        for pre in sorted(self.pre, key=lambda v: str(v)):
             fprint(self.str[str(pre)])
         fprint("")
-        for pre in self.pre:
+        for pre in sorted(self.pre, key=lambda v: str(v)):
             nex = self.pre2nex[pre]
             fprint(self.str[str(nex)])
         fprint("")
-        for pre in self.pre:
+        for pre in sorted(self.pre, key=lambda v: str(v)):
             nex = self.pre2nex[pre]
             fprint(self.str[str(pre)+str(nex)])
         fprint("")
         if len(self.glo) != 0:
-            for g in self.glo:
+            for g in sorted(self.glo, key=lambda v: str(v)):
                 fprint(self.str[str(g)])
             fprint("")
-            for g in self.glo:
+            for g in sorted(self.glo, key=lambda v: str(v)):
                 pre = self.nex2pre[g]
                 fprint(self.str[str(pre)+str(g)])
             fprint("")
         if len(self.vars) != 0:
-            for v in self.vars:
+            for v in sorted(self.vars, key=lambda v: str(v)):
                 fprint(self.str[str(v)])
             fprint("")
-        for h in self.defn_labels:
+        for h in sorted(self.defn_labels, key=lambda v: str(v)):
 #            fprint(self.get_vmt_string_def(h))
             fprint(self.get_vmt_string(h))
             fprint("")
@@ -137,10 +143,10 @@ class print_module_vmt():
             fprint("")
         fprint(self.get_vmt_string("$init"))
         fprint("")
-        for actname in self.actions:
+        for actname in sorted(self.actions, key=lambda v: str(v)):
             fprint(self.get_vmt_string(actname))
             fprint("")
-        for h in sorted(self.helpers.keys()):
+        for h in sorted(self.helpers.keys(), key=lambda v: str(v)):
             fprint(self.get_vmt_string(h))
             fprint("")
         
@@ -155,7 +161,7 @@ class print_module_vmt():
             self.sorts[sort] = 0
             self.str[str(sort)] = res
             
-        for name,sym in ivy_logic.sig.symbols.iteritems():
+        for sym in ivy_logic.sig.symbols.values():
             if isinstance(sym.sort,UnionSort):
                 assert("todo")
             
@@ -168,7 +174,25 @@ class print_module_vmt():
             self.allvars.add(psym)
             self.allvars.add(nsym)
             
-            self.add_constant(sym, True)       
+            self.add_constant(sym, True)
+        
+        for lf in self.definitions:
+            sym = lf.defines()
+            if sym in self.allvars:
+                continue
+            if isinstance(sym.sort,UnionSort):
+                assert("todo")
+            
+            psym = sym.prefix('__')
+            nsym = sym
+            self.pre.add(psym)
+            self.nex.add(nsym)
+            self.pre2nex[psym] = nsym
+            self.nex2pre[nsym] = psym
+            self.allvars.add(psym)
+            self.allvars.add(nsym)
+            
+            self.add_constant(sym, True)
     
     def process_defs(self):
         self.process_defs_v2()
@@ -192,12 +216,12 @@ class print_module_vmt():
             
     def process_defs_v1(self):
         for lf in self.definitions:
-#             print(type(lf.formula))
-#             print(lf.formula)
-            sym = lf.formula.defines()
+#             print(type(lf))
+#             print(lf)
+            sym = lf.defines()
             label = str(sym)
-            lhs = lf.formula.lhs()
-            rhs = lf.formula.rhs()
+            lhs = lf.lhs()
+            rhs = lf.rhs()
             self.add_new_constants(rhs)
             args = []
             if isinstance(lhs, lg.Apply):
@@ -207,8 +231,8 @@ class print_module_vmt():
             
             sym = lgu.substitute(sym, self.nex2pre)
             label = str(sym)
-            lhs = lgu.substitute(lf.formula.lhs(), self.nex2pre)
-            rhs = lgu.substitute(lf.formula.rhs(), self.nex2pre)
+            lhs = lgu.substitute(lf.lhs(), self.nex2pre)
+            rhs = lgu.substitute(lf.rhs(), self.nex2pre)
             self.add_new_constants(rhs)
             args = []
             if isinstance(lhs, lg.Apply):
@@ -220,12 +244,14 @@ class print_module_vmt():
             
     def process_defs_v2(self):
         for lf in self.definitions:
-#             print(type(lf.formula))
-#             print(lf.formula)
-            sym = lf.formula.defines()
+#             print(type(lf))
+#             print(lf)
+            sym = lf.defines()
+            print("definition: %s" % str(sym))
+            
             label = "def_" + str(sym)
-            lhs = lf.formula.lhs()
-            rhs = lf.formula.rhs()
+            lhs = lf.lhs()
+            rhs = lf.rhs()
             self.add_new_constants(rhs)
 
             args = {}
