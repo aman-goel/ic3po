@@ -78,7 +78,7 @@ def set_axiom_formula(self, unbounded):
             cl = self.system.replaceDefinitions(cl, 1)
         axiomS.append(cl)
     
-    if True or (not unbounded):
+    if (not unbounded):
         for k, v in self.system.curr._definitions.items():
             axiomS.append(v)
     
@@ -103,6 +103,10 @@ def set_axiom_formula(self, unbounded):
         res = And(axiomS)
     res = self.get_formula_qf(res)
     self._axiom_formula = res
+    if self.eval_wires:
+        if len(self.system._sort2fin) == len(self.system._sorts):
+            self.eval_engine.set_global_model(res)
+            self.eval_engine.set_wire_instances()
     return res
 
 def set_problem(self, unbounded=False):
@@ -198,6 +202,24 @@ def is_long_clause(system, cl):
             return True
     return False
 
+def formula_cost(self, formula):
+    cost = formula_cost_rec(formula)
+    qvars = formula.get_quantifier_variables()
+    qsorts = dict()
+    for qv in qvars:
+        s = qv.symbol_type()
+        if s not in qsorts:
+            qsorts[s] = []
+        qsorts[s].append(qv)
+    for s, qvar in qsorts.items():
+        factor = 1
+        if s in self.system._enum2qvar:
+            if (len(qvar) >= len(self.system._enum2qvar[s])
+                and len(qvar) > 2):
+                factor = 10000
+        cost += factor*len(qvar)
+    return cost
+
 experimentGeneralize = True
 
 def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
@@ -221,6 +243,9 @@ def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
         enumsort = v.constant_type()
         if self.ordered == "partial" and enumsort in self.system._ordered_sorts:
             continue
+        if self.quorums == "symmetric" and (enumsort in self.system._quorums_parent or enumsort in self.system._quorums_child):
+            continue
+        
         if self.ordered == "zero" and str(enumsort).startswith("epoch"):
 #             continue
             assert(enumsort in self.system._enumsorts)
@@ -254,9 +279,9 @@ def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
 #         if (self.quorums != "none" and 
 #             (str(enumsort).startswith("node") or str(enumsort).startswith("acceptor"))):
 #             continue
-        if (self.quorums != "none" and 
-            (str(enumsort).startswith("quorum"))):
-            continue
+#         if (self.quorums != "none" and 
+#             (str(enumsort).startswith("quorum"))):
+#             continue
         if enumsort in self.system._enum2qvar:
             qvar = []
             if enumsort in enum2qvar:
@@ -269,23 +294,9 @@ def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
             
     antecedent = dict()
     qvars = set()
-    fullsorts = []
 #         print(enum2qvar)
 #         print(self.system._enum2qvar)
-    minSz = 3
-    if experimentGeneralize:
-        minSz = 2
     for enumsort, qvar in enum2qvar.items():
-        if  (
-#                  False and
-#                 (str(enumsort).startswith("acceptor") 
-#                  or str(enumsort).startswith("node")
-#                 or str(enumsort).startswith("quorum")
-#                 ) and 
-#                 (str(enumsort).startswith("quorum")) and 
-            (len(qvar) >= minSz) and 
-            (len(qvar) == len(self.system._enum2qvar[enumsort]))):
-            fullsorts.append([enumsort, qvar])
         antecedent[enumsort] = []
         for i in range(len(qvar) - 1):
             qvi = qvar[i]
@@ -296,8 +307,6 @@ def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
                     antecedent[enumsort].append(deq)
 #                         print("adding: %s" % deq)
         qvars.add(qvar[-1])
-    
-    self.print_fullsorts(fullsorts)
     
     cubeSym = cube
 
@@ -329,17 +338,38 @@ def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
 
     if common.gopts.opt > 0 and reducePremise:
         push_time()
-        antecedent, reduceSz, varSet = self.reduce_antecedent2(cubeSym, qvars, enum2qvar, fIdx)
+        antecedent, reduceSz, varSet = self.reduce_antecedent2(cubeSet, qvars, enum2qvar, fIdx)
         self.update_time_stat("time-antecedent", pop_time())
         print()
     
-    if self.ordered == "partial":
-        cubeSet = self.boost_ordered(cubeSet, antecedent, qvars, fIdx)
+    if self.boost_ordered_en and (self.ordered == "partial"):
+        cubeSet = self.boost_ordered(cubeSet, enum2qvar, antecedent, qvars, fIdx)
+        
+    if self.boost_quorums_en and (self.quorums == "symmetric"):
+        cubeSet = self.boost_quorums(cubeSet, enum2qvar, antecedent, qvars, fIdx)
+    
+    minSz = 3
+    if experimentGeneralize:
+        minSz = 2
+    fullsorts = []
+    for enumsort, qvar in enum2qvar.items():
+        if  (
+#              False and
+#             (str(enumsort).startswith("acceptor") 
+#              or str(enumsort).startswith("node")
+#             or str(enumsort).startswith("quorum")
+#             ) and 
+#             (str(enumsort).startswith("quorum")) and 
+            (len(qvar) >= minSz) and 
+            (len(qvar) == len(self.system._enum2qvar[enumsort]))):
+            fullsorts.append([enumsort, qvar])
 
     eqMap = dict()
     if common.gopts.const > 0:
         eqMap, cubeSet, antecedent, fullsorts = self.propagate_eq(cubeSet, antecedent, ivars, qvars, fullsorts)
 
+    self.print_fullsorts(fullsorts)
+    
     if True:
         cubeSetSimple = cubeSet.copy()
         for v in antecedent.values():
@@ -736,6 +766,14 @@ def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
         print("(learnt sym-boosted clause)")
         print("\t%s" % pretty_serialize(Not(cubesOut[0][0]), mode=0))
         print("---------------------------")
+        
+        if self.exp:
+            cubeTop = cubesOut[0]
+            cubeNew = cubeTop[0]
+#             cubeNew = self.boost_exp2(cubeNew, fIdx)
+            allUnreachable = self.boost_exp(cubeNew, fIdx)
+            cubeNew = Or(allUnreachable)
+            cubesOut[0] = (cubeNew, cubeTop[1])
     else:
         cubesOut = get_uniform(self, fullsorts, cubeSet, qvars, antecedent)
     
@@ -1088,6 +1126,16 @@ def print_sizes2(self, key):
         val += "|%s|=%s;" % (s_inf, ("inf" if sz == 0 else str(sz)))
     print_stat(key, val)
             
+def print_sizes3(self):
+    val = ""
+    for s_inf in sorted(self.system._sorts, key=str):
+        sz = 0
+        if s_inf in self.system._sort2fin:
+            s_fin = self.system._sort2fin[s_inf]
+            sz = len(self.system._enumsorts[s_fin])
+        val += "|%s|=%s;" % (s_inf, ("inf" if sz == 0 else str(sz)))
+    return val
+
 def print_num_state_bits1(self, key):
     tsb = self.system.get_num_state_bits()
     val = "%s" % ("inf" if tsb <= 0 else str(tsb))

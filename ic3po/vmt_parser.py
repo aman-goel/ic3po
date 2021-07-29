@@ -18,7 +18,7 @@ from pysmt.typing import INT, BVType, EnumType, BOOL, FunctionType
 
 from pysmt.environment import get_env
 
-from utils import eprint, time_str, pretty_print_set, pretty_print, pretty_print_str, SORT_SUFFIX, flatten_and, num_majority, substituteDefinitions
+from utils import eprint, time_str, pretty_print_set, pretty_print, pretty_print_str, SORT_SUFFIX, flatten_and, num_majority, substituteDefinitions, parseSizes
 from stratify import StratificationOracle
 from syntax import SyntaxInference
 import common
@@ -466,15 +466,26 @@ class TransitionSystem(SmtLibParser):
         
         self._ordered_sorts = dict()
         self._ordered_min = dict()
+        self._ordered_first = dict()
         self._ordered_max = dict()
         self._dependency_height = dict()
         self._enum_height = dict()
+
+        self._quorums_symbols = set()
+        self._quorums_sorts = dict()
+        self._quorums_consts = dict()
+        self._quorums_parent = set()
+        self._quorums_child = set()
+
+        self.dependent_sort_en = True
+        self._child_sort = set()
+        self._parent_sort = dict()
         
         self._idx = 0
         self.gen = common.gopts.gen
-        self._child_sort = set()
-        self._parent_sort = dict()
-        self._definitionMap = dict()
+        
+        self.modified = set()
+        
 
     def set_curr(self):
         self.curr.copy(self.orig)
@@ -485,7 +496,18 @@ class TransitionSystem(SmtLibParser):
     def reset_ordered_sort(self):
         self._ordered_sorts = dict()
         self._ordered_min = dict()
+        self._ordered_first = dict()
         self._ordered_max = dict()
+        
+    def reset_quorums_sort(self):
+        self._quorums_symbols = set()
+        self._quorums_sorts = dict()
+        self._quorums_consts = dict()
+        self._quorums_parent = set()
+        self._quorums_child = set()
+    
+    def is_quorum_symbol(self, s):
+        return s in self._quorums_symbols
         
     def get_ordered_zero(self):
         self.zero = None
@@ -494,7 +516,7 @@ class TransitionSystem(SmtLibParser):
         res = []
         for g in self.curr._globals:
             gstr = pretty_print_str(g)
-            if gstr == "zero":
+            if gstr == "zero" or gstr == "negone":
                 gt = g.symbol_type()
                 assert(gt in self._enumsorts)
                 domain = self._enumsorts[gt]
@@ -547,18 +569,30 @@ class TransitionSystem(SmtLibParser):
     
     def get_ordered_le(self):
         self.reset_ordered_sort()
+        res = []
         for g in self.curr._globals:
             gstr = pretty_print_str(g)
             print(gstr)
-            if gstr == "zero":
+            if gstr == "zero" or gstr == "negone":
                 gt = g.symbol_type()
                 if gt in self._enumsorts:
                     self._ordered_min[gt] = g
+                    assert(gt in self._enumsorts)
+                    domain = self._enumsorts[gt]
+                    eq = EqualsOrIff(g, domain[0])
+                    res.append(eq)
             elif gstr == "max":
                 gt = g.symbol_type()
                 if gt in self._enumsorts:
                     self._ordered_max[gt] = g
-        res = []
+                    assert(gt in self._enumsorts)
+                    domain = self._enumsorts[gt]
+                    eq = EqualsOrIff(g, domain[-1])
+                    res.append(eq)
+            elif gstr == "firste":
+                gt = g.symbol_type()
+                if gt in self._enumsorts:
+                    self._ordered_first[gt] = g
         for pre in self.curr._le:
             pret = pre.symbol_type()
             orderedt = pret.param_types[0]
@@ -598,6 +632,7 @@ class TransitionSystem(SmtLibParser):
             return And(res)
     
     def get_quorum_axiom(self):
+        self.reset_quorums_sort()
         res = []
         pre = None
         for g in self.curr._globals:
@@ -614,11 +649,14 @@ class TransitionSystem(SmtLibParser):
             if tA in self._enumsorts and tQ in self._enumsorts:
                 domainA = self._enumsorts[tA]
                 domainQ = self._enumsorts[tQ]
-                assert(str(tQ).startswith("quorum:"))
+                if not str(tQ).startswith("quorum:"):
+                    return TRUE()
                 
                 qMap = {}
 
-                if (len(domainA) == 3) and (len(domainQ) == 3):
+                if (len(domainA) == 2) and (len(domainQ) == 1):
+                    qMap[0] = set([0, 1])
+                elif (len(domainA) == 3) and (len(domainQ) == 3):
                     qMap[0] = set([0, 1])
                     qMap[1] = set([0, 2])
                     qMap[2] = set([1, 2])
@@ -638,17 +676,41 @@ class TransitionSystem(SmtLibParser):
                     qMap[7] = set([1, 2, 4])
                     qMap[8] = set([1, 3, 4])
                     qMap[9] = set([2, 3, 4])
+                elif (len(domainA) == 6) and (len(domainQ) == 15):
+                    qMap[0] = set([0, 1, 2, 3])
+                    qMap[1] = set([0, 1, 2, 4])
+                    qMap[2] = set([0, 1, 2, 5])
+                    qMap[3] = set([0, 1, 3, 4])
+                    qMap[4] = set([0, 1, 3, 5])
+                    qMap[5] = set([0, 1, 4, 5])
+                    qMap[6] = set([0, 2, 3, 4])
+                    qMap[7] = set([0, 2, 3, 5])
+                    qMap[8] = set([0, 2, 4, 5])
+                    qMap[9] = set([0, 3, 4, 5])
+                    qMap[10] = set([1, 2, 3, 4])
+                    qMap[11] = set([1, 2, 3, 5])
+                    qMap[12] = set([1, 2, 4, 5])
+                    qMap[13] = set([1, 3, 4, 5])
+                    qMap[14] = set([2, 3, 4, 5])
                 else:
                     assert(0)
                 
+                self._quorums_symbols.add(pre)
+                self._quorums_sorts[tQ] = (pre, tA)
+                self._quorums_consts[tQ] = dict()
+                self._quorums_parent.add(tQ)
+                self._quorums_child.add(tA)
+                
                 for k, v in qMap.items():
                     arg2 = domainQ[k]
+                    self._quorums_consts[tQ][k] = set()
                     for j in range(len(domainA)):
                         arg1 = domainA[j]
                         rel = Function(pre, [arg1, arg2])
                         val = j in v
                         if val:
                             res.append(rel)
+                            self._quorums_consts[tQ][k].add(j)
                         else:
                             res.append(Not(rel))
         if len(res) == 0:
@@ -1028,7 +1090,7 @@ class TransitionSystem(SmtLibParser):
         self._enum_height[x] = i
 
     def set_dependency_height(self, x, useMap):
-        h = 0
+        h = 1
         useSet = set()
         if x in useMap:
             useSet = useMap[x]
@@ -1038,15 +1100,14 @@ class TransitionSystem(SmtLibParser):
                 if (yh > h):
                     h = yh
             h += 1
-            
-        if x not in self.orig._definitions:
-            h = 100
-#         elif x.endswith("choosable"):
-#             h = -1
-#         else:
-# #             h = 200
-#             pass
-        self._dependency_height[x] = h
+        if x in self.orig._definitionMap:
+#             h = (h+1) * (1+len(self.orig._definitionMap[x][-1]))
+#             h = 0
+            pass
+        elif x in self.orig._vars:
+            h = 1000
+#         h = 0
+        self._dependency_height[str(x)] = h
         return h
     
     def preprocess_definitions(self):
@@ -1057,16 +1118,6 @@ class TransitionSystem(SmtLibParser):
             for k, v in self.orig._definitions.items():
                 print("\t%s := %s\n\t\twith variables %s" % (str(k), str(v), v.get_free_variables()))
             
-            useMap = dict()
-            for k, v in self.orig._definitions.items():
-                freeVars = v.get_free_variables()
-                for w in freeVars:
-                    x = str(w)
-                    if x not in useMap:
-                        useMap[x] = set()
-                    if (x != k):
-                        useMap[x].add(k)
-
             for k, v in self.orig._definitions.items():
                 rel = None
                 args = []
@@ -1108,10 +1159,29 @@ class TransitionSystem(SmtLibParser):
 #                 print("rhs: %s" % rhs)
 #                 assert(0)
                 self.orig._definitionMap[rel] = [rhs, lhs, args]
-            
+
+            useMap = dict()
+            for k, entry in self.orig._definitionMap.items():
+                v = entry[0]
+                freeVars = v.get_free_variables()
+                freeVars = freeVars.difference(set(entry[-1]))
+                for x in freeVars:
+                    if x not in useMap:
+                        useMap[x] = set()
+                    if (x != k):
+                        useMap[x].add(k)
+#             print("useMap: ", useMap)
             for x in useMap.keys():
                 self.set_dependency_height(x, useMap)
-                print("\tdep_height[%s] = %d" % (x, self._dependency_height[x]))
+            for x in self.orig._states:
+                if str(x) not in self._dependency_height:
+                    self._dependency_height[str(x)] = 0
+            for x in self.orig._nexstates:
+                if str(x) not in self._dependency_height:
+                    self._dependency_height[str(x)] = 0
+            for lhs in sorted(self._dependency_height.keys(), key=lambda v: (self._dependency_height[v])):
+                rhs = self._dependency_height[lhs]
+                print("\tdep_height[%s] = %d" % (lhs, rhs))
     
     def postprocess_definitions(self):
         return
@@ -1126,39 +1196,65 @@ class TransitionSystem(SmtLibParser):
         for k, v in self._enumsorts.items():
             for i, x in enumerate(v):
                 self.set_enum_height(x, i + 100*idx)
+#                 self.set_enum_height(x, i)
                 print("\tdep_height[%s] = %d" % (pretty_print_str(x), self._enum_height[x]))
             idx += 1
     
+    def print_modified(self):
+        print("(modified) #%d" % len(self.modified))
+        for v in self.modified:
+            print("\t%s" % pretty_print_str(v))
+    
     def get_dependency_priority(self, v, use_wires=False):
-        p = 0
+#         if v in self.modified:
+#             return 0
+        p = 1
         fv = v.get_free_variables()
         for w in fv:
             x = pretty_print_str(w)
             if x in self._dependency_height:
                 h = self._dependency_height[x]
+#                 wt = w.symbol_type()
+#                 if wt.is_function_type():
+#                     h *= (1+len(wt.param_types))
                 if (h > p):
                     p = h
+            else:
+                p = 0
         
-        if not use_wires:
-            fv = v.get_enum_constants()
-            for w in fv:
-                assert(w in self._enum_height)
-                h = self._enum_height[w]
-    #             p += h
-                if (h > p):
-                    p = h
-    #         p *= len(fv)            
+        e = 1
+        fv = v.get_enum_constants()
+        for w in fv:
+            assert(w in self._enum_height)
+            h = self._enum_height[w]
+#             e += h
+            if (h > e):
+                e = h
+#         e *= len(fv)
+
+#         p = 0
+#         e = 0
+#         return (p, e)
         return p
     
     def set_sort_dependency(self):
-        for child in self._sorts:
-            if str(child) == "quorum":
-                for parent in self._sorts:
-                    if str(parent) == "node" or str(parent) == "acceptor":
-                        self._parent_sort[parent] = child
-                        self._child_sort.add(child)
-                        print("\t(found sort dependency: %s -> %s)" % (parent, child))
-                        break
+        if self.dependent_sort_en:
+            pre = None
+            for g in self.orig._globals:
+                name = str(g)
+                if name == "member":
+                    pre = g
+                    break
+            if pre != None:
+                pret = pre.symbol_type()
+                assert(len(pret.param_types) == 2)
+                tA = pret.param_types[0]
+                tQ = pret.param_types[1]
+                
+                if str(tQ) == "quorum":
+                    self._parent_sort[tA] = tQ
+                    self._child_sort.add(tQ)
+                    print("\t(found sort dependency: %s -> %s)" % (tA, tQ))
         
     def read_ts(self, script_ss):
         script = self._parser.get_script(script_ss)
@@ -1200,26 +1296,26 @@ class TransitionSystem(SmtLibParser):
                     for v in lst:
                         self.orig.add_definition(f, v)
         
-        self.set_sort_dependency()
-        
         if len(self.orig._helpers) != 0:
             eprint("\t(found #%d user-provided helpers)" % len(self.orig._helpers))
             print("\t(found #%d user-provided helpers)" % len(self.orig._helpers))
 #             assert(0)
 
-            print("\nConverting helpers to axioms")
-            print("Helpers #%s" % len(self.orig._helpers))
-            for k, v in self.orig._helpers.items():
-                print("\t%s := %s\n\t\twith variables %s" % (str(v), str(k), k.get_free_variables()))
-                self.orig.add_axiom(k)
-            self.orig._helpers.clear()
-            
-#             print("\nConverting helpers to inferences")
+#             print("\nConverting helpers to axioms")
 #             print("Helpers #%s" % len(self.orig._helpers))
 #             for k, v in self.orig._helpers.items():
 #                 print("\t%s := %s\n\t\twith variables %s" % (str(v), str(k), k.get_free_variables()))
-#                 self.orig._infers[k] = v
+#                 self.orig.add_axiom(k)
+#                 knext = k.simple_substitute(self.orig._pre2nex)
+#                 self.orig.add_axiom(knext)
 #             self.orig._helpers.clear()
+            
+            print("\nConverting helpers to inferences")
+            print("Helpers #%s" % len(self.orig._helpers))
+            for k, v in self.orig._helpers.items():
+                print("\t%s := %s\n\t\twith variables %s" % (str(v), str(k), k.get_free_variables()))
+                self.orig._infers[k] = v
+            self.orig._helpers.clear()
         
         print("-----------------------------------------------------------------")
             
@@ -1245,6 +1341,8 @@ class TransitionSystem(SmtLibParser):
         
         self.syntax.process_inputs()
         
+        self.set_sort_dependency()
+        
         print(self.orig)
         self.set_finite_curr()
         self.set_curr()
@@ -1254,14 +1352,31 @@ class TransitionSystem(SmtLibParser):
     def set_finite_curr(self):
         if common.gopts.mode == "updr":
             return
-        if len(self._sort2fin) == 0:
+        if common.gopts.size == "default":
+            if len(self._sort2fin) == 0:
+                for tt in sorted(self._sorts, key=str):
+                    ri = "0"
+                    if (common.gopts.init >= 0):
+                        ri = str(common.gopts.init)
+                    else:
+                        eprint("Finitize %s ? " % (str(tt)), end='')
+                        ri = raw_input("")
+    
+                    if ri:
+                        try:
+                            sz = int(ri)
+                            if sz > 0:
+                                self.add_sort(tt, sz)
+                                eprint("\t(setting |%s| to %d)" % (str(tt), sz))
+                        except ValueError:
+                            pass
+        else:
+            sizes = parseSizes(common.gopts.size)
             for tt in sorted(self._sorts, key=str):
                 ri = "0"
-                if (common.gopts.init >= 0):
-                    ri = str(common.gopts.init)
-                else:
-                    eprint("Finitize %s ? " % (str(tt)), end='')
-                    ri = raw_input("")
+                k = str(tt)
+                if k in sizes:
+                    ri = sizes[k]
 
                 if ri:
                     try:
@@ -1321,7 +1436,7 @@ class TransitionSystem(SmtLibParser):
             if s in self.curr._le:
 #                 eprint("skipping " + str(s))
                 continue
-            if str(s).startswith("member:"):
+            if s in self._quorums_symbols:
 #                 eprint("skipping " + str(s))
                 continue
             if s in self.curr._definitionMap:

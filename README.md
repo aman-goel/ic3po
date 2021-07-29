@@ -46,7 +46,7 @@ IC3PO creates a directory ```<output-path>/<test-name>``` which contains results
     └── <test-name>.log			[IC3PO log]
 ````
 As a quick summary relating to the run, IC3PO produces certain key information as output.
-	For example, running ```python2 ic3po.py -o foo -n bar ivybench/ex/ivy/toy_consensus.ivy --init 3``` produces the following output:
+	For example, running ```python2 ic3po.py -o foo -n bar ivybench/ex/ivy/toy_consensus.ivy --size node=3,quorum=3,value=3``` produces the following output:
 ````
 	(output dir: foo/bar)
 	(frontend: ivy)
@@ -56,15 +56,17 @@ As a quick summary relating to the run, IC3PO produces certain key information a
 	(opt: 1)
 	(const: 1)
 	(wires: 1)
-	(init size: 3)
-	(using z3 4.8.9.0 with seed 0)
-	(using yices 2.6.2 with seed 0)
+	(using z3 4.8.9.0 with seed 1)
+	(using yices 2.6.2 with seed 1)
 	(found #4 definitions)
 	(epr: True)
-	(gen: prefer_epr)
+	(gen: fe)
 	(found #2 actions)
+Finitize node ? 3
 	(setting |node| to 3)
+Finitize quorum ? 3
 	(setting |quorum| to 3)
+Finitize value ? 3
 	(setting |value| to 3)
 
 Finite sorts: #3
@@ -72,27 +74,24 @@ Finite sorts: #3
 	|quorum| = 3
 	|value| = 3
 	(input is in epr)
-@     0s  0: 1 :1    
-@     0s  1: 1 1 :2    
-@     2s  2: 1 2 3 :6    
-@     3s  3: 1 3 3 3 :10    
-@     5s  4: 1 2 3 1 4 :11    
-@     5s  5: 1 2 2 1 0 5 :11    
+@     1s  0: 1 :1    
+@     2s  1: 1 1 :2    
+@     2s  2: 1 1 2 :4    
+@     2s  3: 1 1 0 2 :4    
 
-@     5s  Minimizing...
-@     6s  Minimized proof certificate (finite) of size 3.
-@     6s  (finite convergence checks)
-@     6s  	|node| = 4 :	pass
-@     6s  	|value| = 4 :	pass
-@     6s  	|quorum| = 4 :	pass
-@     6s  (all finite convergence checks passed)
-@     6s  (unbounded induction checks passed)
+@     2s  Proof certificate (finite) of size 3.
+@     2s  (finite convergence checks)
+@     2s  	|node| = 4 :	pass
+@     2s  	|value| = 4 :	pass
+@     2s  	|quorum| = 4 :	pass
+@     2s  (all finite convergence checks passed)
+@     2s  (unbounded induction checks skipped)
 Finite sorts (final): #3
 	|quorum| = 3
 	|node| = 3
 	|value| = 3
 	(invariant file: foo/bar/bar.inv)
-@     6s  Property proved. Proof certificate of size 3
+@     2s  Property proved. Proof certificate of size 3
 	(with inv: epr: True)
 ````
 ":" separated numbers indicate the following:

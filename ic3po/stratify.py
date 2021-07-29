@@ -20,10 +20,6 @@ class StratificationOracle():
         self.skolem_map = {}
         self.epr = True
         self.has_exists = False
-        self._definitionMap = dict()
-    
-    def set_definitionMap(self, defMap):
-        self._definitionMap = defMap
             
     def is_epr(self):
         return self.epr

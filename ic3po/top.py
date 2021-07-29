@@ -16,7 +16,7 @@ import resource
 
 DEFAULT_MODE="ic3po"
 DEFAULT_MINIMIZE=2
-DEFAULT_QF=0
+DEFAULT_QF=3
 DEFAULT_GEN="prefer_epr"
 DEFAULT_RANDOM=0
 DEFAULT_OUT="output/test"
@@ -29,6 +29,8 @@ DEFAULT_OPTIMIZE=1
 DEFAULT_CONST=1
 DEFAULT_WIRES=1
 DEFAULT_VERBOSITY=0
+DEFAULT_FINV=0
+DEFAULT_SIZE="default"
 
 header="""
 ---
@@ -61,6 +63,8 @@ def getopts(header):
     p.add_argument('--const',             help='constant propagation (between 0-1) (default: %r)' % DEFAULT_CONST, type=int, default=DEFAULT_CONST)
     p.add_argument('-w', '--wires', help='use wires (between 0-1) (default: %r)' % DEFAULT_WIRES, type=int, default=DEFAULT_WIRES)
     p.add_argument('--init', help='initial size (use -1 to use vmt size) (default: %r)' % DEFAULT_INITSZ, type=int, default=DEFAULT_INITSZ)
+    p.add_argument('--finv', help='use 1 to exit after printing the finite invariant for safe property (default: %r)' % DEFAULT_FINV, type=int, default=DEFAULT_FINV)
+    p.add_argument('--size', help='finite size (, separated)', type=str, default=DEFAULT_SIZE)
     p.add_argument('-v', '--verbosity', help='verbosity level (default: %r)' % DEFAULT_VERBOSITY, type=int, default=DEFAULT_VERBOSITY)
     args, leftovers = p.parse_known_args()
     return args, p.parse_args()
