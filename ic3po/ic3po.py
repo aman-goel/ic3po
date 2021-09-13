@@ -4266,7 +4266,6 @@ def backwardReach(fname, system=None):
         iterationCount += 1
         inv_set_l = None
         cex = None
-        forceMinimize = False
         forceReset = False
         nFailed = 0
         nFailed_ind = 0
@@ -4290,7 +4289,7 @@ def backwardReach(fname, system=None):
             inv_set_l = set()
             inv_set_optional_l = set()
             inv_set_l, cex = p.check_property(helpers)
-            if inv_set_l != None and common.gopts.min == 2:
+            if inv_set_l != None and common.gopts.min >= 1:
                 inv_full_fin = []
                 prop = prop_formula(p)
                 for label, cl in inv_set_l:
@@ -4472,8 +4471,6 @@ def backwardReach(fname, system=None):
                 nFailed, inv_pruned_inf_l = p.check_and_prune_invariant(inv_set_check_inf_l, 0)
                 if nFailed != 0 and len(inv_set_all_inf_l) != len(inv_set_inf_l):
                     nFailed, inv_pruned_inf_l = p.check_and_prune_invariant(inv_set_all_inf_l, 0)
-                    if common.gopts.gen == "epr_strict":
-                        forceMinimize = True
             else:
                 inv_pruned_inf_l = inv_set_check_inf_l
                 
@@ -4502,18 +4499,11 @@ def backwardReach(fname, system=None):
             p.print_stats()
             pretty_print_inv(inv_full_inf, "Proof certificate")
             
-            invName = "%s/%s.inv" % (common.gopts.out, common.gopts.name)
-            eprint("\t(invariant file: %s)" % invName)
-            print("\t(invariant file: %s)" % invName)
-            common.gopts.invF = open(invName, "w")
-            pretty_print_inv_file(common.gopts.invF, inv_full_inf)
-            common.gopts.invF.close()
-    
             inv_final = inv_full_inf
             invSz = len(inv_final)
             print_stat("sz-invariant-ic3", invSz)
             eprint(time_str(), "Property proved. Proof certificate of size %d" % len(inv_full_inf))
-            if forceMinimize or (common.gopts.min == 1):
+            if (common.gopts.min >= 2):
                 eprint(time_str(), "Minimizing...")
                 inv_minimized_inf, inv_optional_inf = p.minimize_invariant(inv_full_inf)
                 inv_final = inv_minimized_inf
@@ -4524,6 +4514,13 @@ def backwardReach(fname, system=None):
                     pretty_print_inv(inv_optional_inf, "Optional invariants", "_optional")
 #                 p.print_smt2_set(inv_minimized)
             
+            invName = "%s/%s.inv" % (common.gopts.out, common.gopts.name)
+            eprint("\t(invariant file: %s)" % invName)
+            print("\t(invariant file: %s)" % invName)
+            common.gopts.invF = open(invName, "w")
+            pretty_print_inv_file(common.gopts.invF, inv_final)
+            common.gopts.invF.close()
+    
             totalF = 0
             totalE = 0
             totalA = 0
