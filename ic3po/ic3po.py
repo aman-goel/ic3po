@@ -76,7 +76,7 @@ class PDR(object):
         self.cutoff = 1
         self.reduce = 0
         self.check_global = True
-        self.unbounded_checks = False
+        self.unbounded_checks = (common.gopts.finv == 2)
 #         if False:
         if True:
             self.eval_wires = True
