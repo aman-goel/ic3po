@@ -29,6 +29,7 @@ from pysmt.exceptions import SolverReturnedUnknownResultError
 import utils
 from utils import *
 from problem import *
+from simulate import *
 from z3.z3util import get_z3_version
 from pysmt.pretty_printer import pretty_serialize
 import common
@@ -53,6 +54,7 @@ class PDR(object):
         self.qf_fallback_timeout = 0       # in milliseconds
         self.use_z3_minimize = False
         self.seed = common.gopts.seed
+        random.seed(self.seed)
         eprint("\t(using z3 %s with seed %s)" % (get_z3_version(True), "random" if (self.random > 0) else str(self.seed)))
         print("\t(using z3 %s with seed %s)" % (get_z3_version(True), "random" if (self.random > 0) else str(self.seed)))
         eprint("\t(using yices %s with seed %s)" % (yices_api.yices_version, "random" if (self.random > 0) else str(self.seed)))
@@ -63,17 +65,29 @@ class PDR(object):
         self.subsume_level = common.gopts.subsume
         self.allow_inputs_in_cube = False
         self.use_wires = (common.gopts.wires != 0)
-        if False:
-#         if True:
+        self.reuse_inf_en = False
+        self.boost_ordered_en = False
+        self.boost_quorums_en = False
+        self.eval_wires = False
+        self.exp = False
+        self.ordered = "none"
+        self.quorums = "none"
+        self.boosting = "any"
+        self.cutoff = 1
+        self.reduce = 0
+        self.check_global = True
+        self.unbounded_checks = (common.gopts.finv == 2)
+#         if False:
+        if True:
+            self.eval_wires = True
+#             self.exp = True
+            self.quorums = "symmetric"
+            self.boost_quorums_en = True
+#             self.boosting = "none"
+#             self.allow_inputs_in_cube = True
+        if common.gopts.rb == 1:
             self.ordered = "partial"
-            self.quorums = "none"
-            self.boosting = "any"
-            self.allow_inputs_in_cube = False
-        else:
-            self.ordered = "none"
-#             self.quorums = "symmetric"
-            self.quorums = "none"
-            self.boosting = "any"
+            self.boost_ordered_en = True
     
     def init_solver(self, qf):
         if qf == 0:
@@ -121,6 +135,7 @@ class PDR(object):
 #         print("z3.smt.core.minimize = %s" % z3.get_param('smt.core.minimize'))
 #         print('PYTHON HASH SEED IS', os.environ['PYTHONHASHSEED'])
         self.qf = common.gopts.qf
+        self.eval_engine = EvalEngine(self.system, self)
     
     def solver_seed(self):
         return self.seed
@@ -301,6 +316,7 @@ class PDR(object):
 #             for i in n:
 #                 print("\t", i, " of type %s" % type(i))
 
+#             new_solver = Solver(name="z3", logic="UF", random_seed=self.solver_seed())
             new_solver = self.init_solver(1)
             for i in assertions:
                 if isinstance(i, tuple):
@@ -580,14 +596,14 @@ class PDR(object):
 #         print(antecedent)
         return antecedent, reduceSz, coreSetVar
     
-
     def find_required_conditions(self, solver, formula, assumptions):
         origSz = len(assumptions)
         self.qtype = "ant"
         
 #         print("# assumptions: %d" % len(assumptions))
 #         for f in assumptions:
-#             print("assumptions: %s -> %s" % (str(f), str(sym2ant[f])))
+#             print("%s" % pretty_print_str(f))
+#         print("formula: %s" % pretty_print_str(formula))
         
         solver.push()
         solver.add_assertion(formula)
@@ -656,16 +672,599 @@ class PDR(object):
         reduceSz = origSz - newSz
         if (reduceSz != 0):
             self.update_stat("antecedent-calls-reduced", 1)
-            print(time_str(), "antecedent: %d -> %d (reduced)" % (origSz, newSz))
-        else:
-            print(time_str(), "antecedent: %d -> %d" % (origSz, newSz))
+#             print(time_str(), "antecedent: %d -> %d (reduced)" % (origSz, newSz))
+#         else:
+#             print(time_str(), "antecedent: %d -> %d" % (origSz, newSz))
         
         print("# required: %d" % len(required))
         for f in required:
-            print("required: %s" % pretty_serialize(f))
+            print("(required) %s" % pretty_serialize(f))
         return False, required
+    
+    def is_reachable(self, solver, cube):
+        solver.push()
+        solver.add_assertion(cube)
+        result = self.solve_formula(solver, TRUE(), True)
+        solver.pop()
+        return result
+    
+    def print_permcube(self, pc, allConsts, presentConstsSet, cid):
+        p = pc[1]
+        c = pc[0]
+        perm = "[ "
+        for idx, l in enumerate(allConsts):
+            if l in presentConstsSet:
+                r = p[idx]
+                perm += "%s, " % pretty_serialize(r, mode=0)
+        perm += "]"
+        print("  %s\t%s" % (perm, pretty_serialize(Not(c), mode=0)))
+        
+        
+    def boost_exp(self, cube, fIdx):
+        print("(boosting ordered sorts)")
+        print("(input clause)")
+        print("\t%s" % pretty_serialize(Not(cube), mode=0))
+        cubeConsts = cube.get_enum_constants()
+        cubeRels = cube.get_free_variables()
+        print("(constants)")
+        for c in cubeConsts:
+            print("\t%s" % pretty_serialize(c))
+        print("(relations)")
+        for r in cubeRels:
+            print("\t%s" % pretty_serialize(r))
+        allUnreachable = set()
+            
+        for s, le in self.system._ordered_sorts.items():
+            allConsts = self.system._enumsorts[s]
+            presentConstsSet = cubeConsts.intersection(allConsts)
+            if len(presentConstsSet) == 0:
+                continue
+            presentConstsList = []
+            for c in allConsts:
+                if c in presentConstsSet:
+                    presentConstsList.append(c)
+            print("(boosting ordered sort: %s)" % s)
+            print("(ordered consts) #%d" % (len(presentConstsList)))
+            self.print_permcube((cube, allConsts), allConsts, presentConstsSet, 0)
+            
+#             mode = "perm"
+#             constPerms = list(itertools.permutations(list(allConsts)))
+#             print("(permutations: #%d)" % len(constPerms))
+#             for idx, p in enumerate(constPerms):
+#                 print("  %d:\t%s" % (idx, pretty_print_set(p)))
 
-    def boost_ordered(self, cubeSet, antecedent, qvars, fIdx):
+            mode = "comb"
+            constPerms = list(itertools.combinations(list(allConsts), len(presentConstsList)))
+            print("(combinations: #%d)" % len(constPerms))
+            for idx, p in enumerate(constPerms):
+                print("  %d:\t%s" % (idx, pretty_print_set(p)))
+
+            permCubesSet = set()
+            permCubes = []
+            
+            for idx, pOrig in enumerate(constPerms):
+                p = pOrig
+                subs = {}
+                if mode == "comb":
+                    cCount = 0
+                    p = []
+                    for idx, c in enumerate(allConsts):
+                        if c in presentConstsSet:
+                            p.append(pOrig[cCount])
+                            cCount += 1
+                        else:
+                            p.append(c)
+                subs = {allConsts[i]: p[i] for i in range(len(allConsts))}
+                cubePerm = cube.simple_substitute(subs)
+                if cubePerm not in permCubesSet:
+                    permCubesSet.add(cubePerm)
+                    permCubes.append((cubePerm, p))
+                    cid = len(permCubes)
+#                     print("  c%d:\t%s" % (cid, pretty_serialize(Not(cubePerm), mode=0)))
+            
+            reachableCubes = []
+            unreachableCubes = []
+            solver = self.get_framesolver(fIdx)
+            for cid, pc in enumerate(permCubes):
+                c = pc[0]
+                isReachable = self.is_reachable(solver, c)
+                if isReachable:
+                    reachableCubes.append(cid)
+                else:
+                    unreachableCubes.append(cid)
+            print("(unreachable: #%d)" % len(unreachableCubes))
+            for cid in unreachableCubes:
+                pc = permCubes[cid]
+                self.print_permcube(pc, allConsts, presentConstsSet, cid)
+            if len(reachableCubes) != 0:
+                print("(reachable: #%d)" % len(reachableCubes))
+                for cid in reachableCubes:
+                    pc = permCubes[cid]
+                    self.print_permcube(pc, allConsts, presentConstsSet, cid)
+            else:
+                print("(reachable: none)")
+                
+            if False and (len(reachableCubes) == 0):
+                print("(all unreachable)")
+                subs = {}
+                allVars = self.system._enum2qvar[s]
+                presentVars = []
+                for idx, c in enumerate(allConsts):
+                    if c in presentConstsSet:
+                        qv = allVars[len(presentVars)]
+                        subs[c] = qv
+                        presentVars.append(qv)
+                assert(len(presentVars) != 0)
+                genCube = []
+                genCube.append(cube.simple_substitute(subs))
+                for i in range(len(presentVars)-1):
+                    qvi = presentVars[i]
+                    for j in range(i+1, len(presentVars)):
+                        if i != j:
+                            deq = Not(EqualsOrIff(qvi, presentVars[j]))
+                            genCube.append(deq)
+                cubeNew = And(genCube)
+                cubeNew = Exists(presentVars, cubeNew)
+                print("\t%s" % pretty_serialize(Not(cubeNew), mode=0))
+                allUnreachable.add(cubeNew)
+            else:
+                for cid in unreachableCubes:
+                    pc = permCubes[cid]
+                    allUnreachable.add(pc[0])
+        print("---------------------------")
+        if len(allUnreachable) == 0:
+            allUnreachable.add(cube)
+            
+        self.boost_exp_ordered(cube, fIdx)
+
+#         eprint("Continue? ", end='')
+#         ri = raw_input("")
+        return allUnreachable
+    
+    def boost_exp_ordered(self, cube, fIdx):
+        cubeConsts = cube.get_enum_constants()
+            
+        for s, le in self.system._ordered_sorts.items():
+            allConsts = self.system._enumsorts[s]
+            presentConsts = cubeConsts.intersection(allConsts)
+            if len(presentConsts) == 0:
+                continue
+            
+            print("(quantifier inference for ordered)")
+            subs = {}
+            vars2idx = {}
+            idx2var = []
+            allVars = self.system._enum2qvar[s]
+            presentVars = []
+            for idx, c in enumerate(allConsts):
+                if c in presentConsts:
+                    qv = allVars[idx]
+                    subs[c] = qv
+                    vars2idx[qv] = idx
+                    idx2var.append(qv)
+                    presentVars.append(qv)
+                else:
+                    idx2var.append(None)
+            cubeNew = cube.simple_substitute(subs)
+#             print("(vars)")
+#             for v in presentVars:
+#                 print("\t%s" % pretty_serialize(v))
+#             print("<body>")
+#             print("\t%s" % pretty_serialize(Not(cubeNew), mode=0))
+            print("(clause template)")
+            print("\tforall %s. <something> -> %s" % (pretty_print_set(presentVars, mode=0), pretty_serialize(Not(cubeNew), mode=0)))
+                
+            conditionsEq = []
+            for i in range(0,len(idx2var)-1):
+                qvi = idx2var[i]
+                if qvi == None:
+                    continue
+                for j in range(i+1,len(idx2var)):
+                    qvj = idx2var[j]
+                    if qvj == None:
+                        continue
+                    assert(qvi != qvj)
+                    cond = Not(EqualsOrIff(qvi, qvj))
+                    conditionsEq.append(cond)
+            conditionsLe = []
+            for i in range(0,len(idx2var)-1):
+                qvi = idx2var[i]
+                if qvi == None:
+                    continue
+                qvj = None
+                for j in range(i+1,len(idx2var)):
+                    qvj = idx2var[j]
+                    if qvj != None:
+                        break
+                if qvj == None:
+                    continue
+                assert(qvi != qvj)
+                cond = Not(Function(le, [qvj, qvi]))
+                conditionsLe.append(cond)
+            conditionsEdge = []
+            if s in self.system._ordered_min:
+                rhs = self.system._ordered_min[s]
+                for i in range(0,len(idx2var)):
+                    qvi = idx2var[i]
+                    if qvi == None:
+                        continue
+                    cond = EqualsOrIff(qvi, rhs)
+                    if i != 0:
+#                         cond = Not(cond)
+#                         conditionsEdge.append(cond)
+                        if i > 0:
+                            cond = Not(Function(le, [qvi, rhs]))
+                            conditionsEdge.append(cond)
+                        pass
+                    else:
+                        conditionsEdge.append(cond)
+            if s in self.system._ordered_max:
+                rhs = self.system._ordered_max[s]
+                for i in range(0,len(idx2var)):
+                    qvi = idx2var[i]
+                    if qvi == None:
+                        continue
+                    cond = EqualsOrIff(qvi, rhs)
+                    if i != (len(idx2var)-1):
+#                         cond = Not(cond)
+#                         conditionsEdge.append(cond)
+                        if i < (len(idx2var)-1):
+                            cond = Not(Function(le, [rhs, qvi]))
+                            conditionsEdge.append(cond)
+                        pass
+                    else:
+                        conditionsEdge.append(cond)
+#             if s in self.system._ordered_first:
+#                 rhs = self.system._ordered_first[s]
+#                 for i in range(0,len(idx2var)):
+#                     qvi = idx2var[i]
+#                     if qvi == None:
+#                         continue
+#                     cond = EqualsOrIff(qvi, rhs)
+#                     if i != 1:
+#                         cond = Not(cond)
+#                         conditionsEdge.append(cond)
+# #                         if i > 1:
+# #                             cond = Not(Function(le, [qvi, rhs]))
+# #                             conditionsEdge2.append(cond)
+#                         pass
+#                     else:
+#                         conditionsEdge.append(cond)
+#                         cond = Function(le, [qvi, rhs])
+#                         conditionsEdge2.append(cond)
+            conditionsFull = []
+            for i in range(len(idx2var)-2, -1, -1):
+                qvi = allVars[i]
+                qvj = allVars[i+1]
+                assert(qvi != None)
+                assert(qvj != None)
+                assert(qvi != qvj)
+                cond = Not(Function(le, [qvj, qvi]))
+                conditionsFull.append(cond)
+            print("(conditions: eq)\t%s" % pretty_serialize(And(conditionsEq)))
+            print("(conditions: le)\t%s" % pretty_serialize(And(conditionsLe)))
+            print("(conditions: edge)\t%s" % pretty_serialize(And(conditionsEdge)))
+            print("(conditions: full)\t%s" % pretty_serialize(And(conditionsFull)))
+                
+            solver = self.get_framesolver(fIdx)
+            result = True
+            conditions = []
+#             conditions.extend(conditionsEq)
+#             conditions.extend(conditionsLe)
+#             conditions.extend(conditionsEdge)
+#             conditions.extend(conditionsFull)
+            result, required = self.find_required_conditions(solver, cubeNew, conditions)
+            if (not result):
+#                 print("(conditions: none are sufficient)")
+                print("(sufficient constraint: none)")
+#             assert(not result)
+
+            if result and len(conditionsEq) != 0:
+#                 conditions.extend(conditionsEq)
+                conditions = conditionsEq
+                result, required = self.find_required_conditions(solver, cubeNew, conditions)
+                if (not result):
+#                     print("(conditions: eq are sufficient)")
+                    print("(sufficient constraint: eq)")
+                    
+            if result and len(conditionsLe) != 0:
+#                 conditions.extend(conditionsLe)
+                conditions = conditionsLe
+                result, required = self.find_required_conditions(solver, cubeNew, conditions)
+                if (not result):
+#                     print("(conditions: le are sufficient)")
+                    print("(sufficient constraint: le)")
+                    
+            if result and len(conditionsEdge) != 0:
+#                 conditions.extend(conditionsEdge)
+                conditions = conditionsEdge
+                result, required = self.find_required_conditions(solver, cubeNew, conditions)
+                if (not result):
+#                     print("(conditions: edge are sufficient)")
+                    print("(sufficient constraint: edge)")
+                    
+            if result:
+                conditions = []
+                conditions.extend(conditionsEq)
+                conditions.extend(conditionsLe)
+                conditions.extend(conditionsEdge)
+                result, required = self.find_required_conditions(solver, cubeNew, conditions)
+                if (not result):
+#                     print("(conditions: edge are sufficient)")
+                    print("(sufficient constraint: mix)")
+                    
+            if result and len(conditionsFull) != 0:
+#                 conditions.extend(conditionsFull)
+                conditions = conditionsFull
+                result, required = self.find_required_conditions(solver, cubeNew, conditions)
+                if (not result):
+#                     print("(conditions: full are sufficient)")
+                    print("(sufficient constraint: full)")
+                
+            if result:
+                print("(conditions: full are insufficient)")
+                assert(0)
+        print("---------------------------")
+        
+    def boost_exp2(self, cube, fIdx):
+        print("(boosting quorum sorts)")
+        print("(input clause)")
+        print("\t%s" % pretty_serialize(Not(cube), mode=0))
+        cubeConsts = cube.get_enum_constants()
+        cubeRels = cube.get_free_variables()
+        print("(constants)")
+        for c in cubeConsts:
+            print("\t%s" % pretty_serialize(c))
+        print("(relations)")
+        for r in cubeRels:
+            print("\t%s" % pretty_serialize(r))
+            
+        for sQ, rhs in self.system._quorums_sorts.items():
+            mem = rhs[0]
+            sA = rhs[1]
+            allConstsQ = self.system._enumsorts[sQ]
+            allConstsA = self.system._enumsorts[sA]
+            presentConstsSetQ = cubeConsts.intersection(allConstsQ)
+            presentConstsSetA = cubeConsts.intersection(allConstsA)
+            if len(presentConstsSetQ) == 0 and len(presentConstsSetA) == 0:
+                continue
+            presentConstsListQ = []
+            presentConstsListA = []
+            for c in allConstsQ:
+                if c in presentConstsSetQ:
+                    presentConstsListQ.append(c)
+            for c in allConstsA:
+                if c in presentConstsSetA:
+                    presentConstsListA.append(c)
+            print("(boosting quorum sort: %s)" % sQ)
+            print("(quorum parent consts) #%d" % (len(presentConstsListQ)))
+            print("(quorum child consts) #%d" % (len(presentConstsListA)))
+            self.print_permcube((cube, allConstsA), allConstsA, presentConstsSetA, 0)
+            
+            mode = "perm"
+            constPerms = list(itertools.permutations(list(allConstsA)))
+            print("(permutations: #%d)" % len(constPerms))
+            for idx, p in enumerate(constPerms):
+                print("  %d:\t%s" % (idx, pretty_print_set(p)))
+
+            permCubesSet = set()
+            permCubes = []
+            
+            for idx, pOrig in enumerate(constPerms):
+                p = pOrig
+                subs = {}
+                subs = {allConstsA[i]: p[i] for i in range(len(allConstsA))}
+                cubePerm = cube.simple_substitute(subs)
+                if cubePerm not in permCubesSet:
+                    permCubesSet.add(cubePerm)
+                    permCubes.append((cubePerm, p))
+                    cid = len(permCubes)
+#                     print("  c%d:\t%s" % (cid, pretty_serialize(Not(cubePerm), mode=0)))
+            
+            reachableCubes = []
+            unreachableCubes = []
+            solver = self.get_framesolver(fIdx)
+            for cid, pc in enumerate(permCubes):
+                c = pc[0]
+                isReachable = self.is_reachable(solver, c)
+                if isReachable:
+                    reachableCubes.append(cid)
+                else:
+                    unreachableCubes.append(cid)
+            print("(unreachable: #%d)" % len(unreachableCubes))
+            for cid in unreachableCubes:
+                pc = permCubes[cid]
+                self.print_permcube(pc, allConstsA, presentConstsSetA, cid)
+            if len(reachableCubes) != 0:
+                print("(reachable: #%d)" % len(reachableCubes))
+                for cid in reachableCubes:
+                    pc = permCubes[cid]
+                    self.print_permcube(pc, allConstsA, presentConstsSetA, cid)
+            else:
+                print("(reachable: none)")
+                
+        print("---------------------------")
+            
+        cubeNew = self.boost_exp_quorums(cube, fIdx)
+        print("(output clause)")
+        print("\t%s" % pretty_serialize(Not(cubeNew), mode=0))
+        return cubeNew
+    
+    def boost_exp_quorums(self, cube, fIdx):
+        qvars = set()
+        if cube.is_exists():
+            qvarsOld = cube.quantifier_vars()
+            for qv in qvarsOld:
+                qvars.add(qv)
+            cube = And(cube.arg(0))
+        cubeNew = And(cube)
+        consts = cubeNew.get_enum_constants()
+
+        for sQ, rhs in self.system._quorums_sorts.items():
+            mem = rhs[0]
+            sA = rhs[1]
+            allConstsQ = self.system._enumsorts[sQ]
+            allConstsA = self.system._enumsorts[sA]
+            presentConstsQ = consts.intersection(allConstsQ)
+            presentConstsA = consts.intersection(allConstsA)
+            if len(presentConstsQ) == 0 and len(presentConstsA) == 0:
+                continue
+            
+            print("(quantifier inference for quorums)")
+#             print("(boosting quorum sort: %s)" % sQ)
+#             print("(quorum parent consts: %s)" % (pretty_print_set(presentConstsQ)))
+#             print("(quorum child consts: %s)" % (pretty_print_set(presentConstsA)))
+            
+            subs = {}
+            vars2idxQ = {}
+            vars2idxA = {}
+            idx2varQ = []
+            idx2varA = []
+            allVarsQ = self.system._enum2qvar[sQ]
+            allVarsA = self.system._enum2qvar[sA]
+            qvarQ = []
+            qvarA = []
+            for idx, c in enumerate(allConstsQ):
+                if c in presentConstsQ:
+                    qv = allVarsQ[idx]
+                    subs[c] = qv
+                    vars2idxQ[qv] = idx
+                    idx2varQ.append(qv)
+                    qvars.add(qv)
+                    qvarQ.append(qv)
+                else:
+                    idx2varQ.append(None)
+            for idx, c in enumerate(allConstsA):
+                if c in presentConstsA:
+                    qv = allVarsA[idx]
+                    subs[c] = qv
+                    vars2idxA[qv] = idx
+                    idx2varA.append(qv)
+                    qvars.add(qv)
+                    qvarA.append(qv)
+                else:
+                    idx2varA.append(None)
+
+            cubeNew = cubeNew.simple_substitute(subs)
+            cubeSetNew = flatten_cube(cubeNew)
+#             print("(cube: new)")
+#             for c in cubeSetNew:
+#                 print("\t%s" % pretty_serialize(c))
+            print("(vars)")
+            for v in qvarQ:
+                print("\t%s" % pretty_serialize(v))
+            for v in qvarA:
+                print("\t%s" % pretty_serialize(v))
+            print("<body>")
+            print("\t%s" % pretty_serialize(Not(cubeNew), mode=0))
+#             print("(clause template)")
+#             print("\tforall %s, %s. <something> -> %s" % (pretty_print_set(qvarQ, mode=0), pretty_print_set(qvarA, mode=0), pretty_serialize(Not(cubeNew), mode=0)))
+                
+            conditionsEq = []
+            conditionsEqQ = set()
+            conditionsEqA = set()
+            for i in range(0,len(idx2varQ)-1):
+                qvi = idx2varQ[i]
+                if qvi == None:
+                    continue
+                for j in range(i+1,len(idx2varQ)):
+                    qvj = idx2varQ[j]
+                    if qvj == None:
+                        continue
+                    assert(qvi != qvj)
+                    cond = Not(EqualsOrIff(qvi, qvj))
+                    conditionsEqQ.add(cond)
+                    conditionsEq.append(cond)
+            for i in range(0,len(idx2varA)-1):
+                qvi = idx2varA[i]
+                if qvi == None:
+                    continue
+                for j in range(i+1,len(idx2varA)):
+                    qvj = idx2varA[j]
+                    if qvj == None:
+                        continue
+                    assert(qvi != qvj)
+                    cond = Not(EqualsOrIff(qvi, qvj))
+                    conditionsEqA.add(cond)
+                    conditionsEq.append(cond)
+
+            conditionsPresent = []
+            conditionsAbsent = []
+            for i in range(0,len(idx2varQ)):
+                qvi = idx2varQ[i]
+                if qvi == None:
+                    continue
+                qvj = None
+                for j in range(0,len(idx2varA)):
+                    qvj = idx2varA[j]
+                    if qvj == None:
+                        continue
+                    cond = Function(mem, [qvj, qvi])
+                    if j in self.system._quorums_consts[sQ][i]:
+                        conditionsPresent.append(cond)
+                    else:
+                        cond = Not(cond)
+                        conditionsAbsent.append(cond)
+            conditionsFull = []
+            print("(conditions: eq)\t%s" % pretty_serialize(And(conditionsEq)))
+            print("(conditions: present)\t%s" % pretty_serialize(And(conditionsPresent)))
+            print("(conditions: absent)\t%s" % pretty_serialize(And(conditionsAbsent)))
+            print("(conditions: full)\t%s" % pretty_serialize(And(conditionsFull)))
+            
+            solver = self.get_framesolver(fIdx)
+            result = True
+            conditions = []
+#             conditions.extend(conditionsEq)
+#             conditions.extend(conditionsPresent)
+#             conditions.extend(conditionsAbsent)
+#             conditions.extend(conditionsFull)
+            result, required = self.find_required_conditions(solver, cubeNew, conditions)
+            if (not result):
+                print("(sufficient constraint: none)")
+#             assert(not result)
+            
+            if result and len(conditionsEq) != 0:
+                conditions.extend(conditionsEq)
+#                 conditions = conditionsEq
+                result, required = self.find_required_conditions(solver, cubeNew, conditions)
+                if (not result):
+                    print("(sufficient constraint: eq)")
+                    
+            if result and len(conditionsPresent) != 0:
+                conditions.extend(conditionsPresent)
+#                 conditions = conditionsPresent
+                result, required = self.find_required_conditions(solver, cubeNew, conditions)
+                if (not result):
+                    print("(sufficient constraint: present)")
+                    
+            if result and len(conditionsAbsent) != 0:
+                conditions.extend(conditionsAbsent)
+#                 conditions = conditionsAbsent
+                result, required = self.find_required_conditions(solver, cubeNew, conditions)
+                if (not result):
+                    print("(sufficient constraint: absent)")
+                    
+            if result and len(conditionsFull) != 0:
+#                 conditions.extend(conditionsFull)
+                conditions = conditionsFull
+                result, required = self.find_required_conditions(solver, cubeNew, conditions)
+                if (not result):
+                    print("(sufficient constraint: full)")
+                
+            if result:
+                print("(conditions: full are insufficient)")
+                assert(0)
+                
+            for c in required:
+                cubeSetNew.add(c)
+                
+            cubeNew = And(cubeSetNew)
+        if len(qvars) != 0:
+            cubeNew = Exists(qvars, cubeNew)
+        print("---------------------------")
+        return cubeNew
+        
+    def boost_ordered(self, cubeSet, enum2qvar, antecedent, qvars, fIdx):
         cubeNew = And(cubeSet)
         consts = cubeNew.get_enum_constants()
         antConditions = []
@@ -673,11 +1272,11 @@ class PDR(object):
             for c in v:
                 antConditions.append(c)
         antCond = And(antConditions)
+        qvarsOld = qvars.copy()
 
 #         print("(boosting ordered sorts)")
         for s, le in self.system._ordered_sorts.items():
             allConsts = self.system._enumsorts[s]
-            self.system._enumsorts[s]
             presentConsts = consts.intersection(allConsts)
             if len(presentConsts) == 0:
                 continue
@@ -688,6 +1287,7 @@ class PDR(object):
             vars2idx = {}
             idx2var = []
             allVars = self.system._enum2qvar[s]
+            qvarS = []
             for idx, c in enumerate(allConsts):
                 if c in presentConsts:
                     qv = allVars[idx]
@@ -695,8 +1295,11 @@ class PDR(object):
                     vars2idx[qv] = idx
                     idx2var.append(qv)
                     qvars.add(qv)
+                    qvarS.append(qv)
                 else:
                     idx2var.append(None)
+            enum2qvar[s] = qvarS
+            
             cubeNew = cubeNew.simple_substitute(subs)
             cubeSetNew = flatten_cube(cubeNew)
             print("(cube: new)")
@@ -739,8 +1342,11 @@ class PDR(object):
                         continue
                     cond = EqualsOrIff(qvi, rhs)
                     if i != 0:
-                        cond = Not(cond)
-                        conditionsEdge.append(cond)
+#                         cond = Not(cond)
+#                         conditionsEdge.append(cond)
+                        if i > 0:
+                            cond = Not(Function(le, [qvi, rhs]))
+                            conditionsEdge.append(cond)
                     else:
                         conditionsEdge.append(cond)
             if s in self.system._ordered_max:
@@ -751,31 +1357,53 @@ class PDR(object):
                         continue
                     cond = EqualsOrIff(qvi, rhs)
                     if i != (len(idx2var)-1):
-                        cond = Not(cond)
-                        conditionsEdge.append(cond)
+#                         cond = Not(cond)
+#                         conditionsEdge.append(cond)
+                        if i < (len(idx2var)-1):
+                            cond = Not(Function(le, [rhs, qvi]))
+                            conditionsEdge.append(cond)
                     else:
                         conditionsEdge.append(cond)
             conditionsFull = []
-            for i in range(0,len(idx2var)-1):
-                qvi = allVars[i]
-                qvj = allVars[i+1]
-                assert(qvi != None)
-                assert(qvj != None)
-                assert(qvi != qvj)
-                cond = Not(Function(le, [qvj, qvi]))
-                conditionsFull.append(cond)
-            print("(conditions: eq)")
-            for c in conditionsEq:
-                print("\t%s" % pretty_serialize(c))
-            print("(conditions: le)")
-            for c in conditionsLe:
-                print("\t%s" % pretty_serialize(c))
-            print("(conditions: edge)")
-            for c in conditionsEdge:
-                print("\t%s" % pretty_serialize(c))
-            print("(conditions: full)")
-            for c in conditionsFull:
-                print("\t%s" % pretty_serialize(c))
+            for i in range(0,len(idx2var)):
+                for j in range(i, len(idx2var)):
+                    qvi = allVars[i]
+                    qvj = allVars[j]
+                    assert(qvi != None)
+                    assert(qvj != None)
+                    cond1 = Function(le, [qvi, qvj])
+                    cond2 = Function(le, [qvj, qvi])
+                    if (i == j):
+                        conditionsFull.append(cond1)
+                    elif (i < j):
+                        conditionsFull.append(cond1)
+                        conditionsFull.append(Not(cond2))
+                    elif (i > j):
+                        conditionsFull.append(Not(cond1))
+                        conditionsFull.append(cond2)
+                    else:
+                        assert(0)
+#             for i in range(0,len(idx2var)-1):
+#                 qvi = allVars[i]
+#                 qvj = allVars[i+1]
+#                 assert(qvi != None)
+#                 assert(qvj != None)
+#                 assert(qvi != qvj)
+#                 cond = Not(Function(le, [qvj, qvi]))
+#                 conditionsFull.append(cond)
+
+#             print("(conditions: eq)")
+#             for c in conditionsEq:
+#                 print("\t%s" % pretty_serialize(c))
+#             print("(conditions: le)")
+#             for c in conditionsLe:
+#                 print("\t%s" % pretty_serialize(c))
+#             print("(conditions: edge)")
+#             for c in conditionsEdge:
+#                 print("\t%s" % pretty_serialize(c))
+#             print("(conditions: full)")
+#             for c in conditionsFull:
+#                 print("\t%s" % pretty_serialize(c))
                 
             solver = self.get_framesolver(fIdx)
             result = True
@@ -810,6 +1438,212 @@ class PDR(object):
                 if (not result):
                     print("(conditions: edge are sufficient)")
                     
+            if result:
+                conditions = []
+                conditions.extend(conditionsEq)
+                conditions.extend(conditionsLe)
+                conditions.extend(conditionsEdge)
+                result, required = self.find_required_conditions(solver, And(antCond, cubeNew), conditions)
+                if (not result):
+                    print("(conditions: mix are sufficient)")
+                    
+            if result and len(conditionsFull) != 0:
+#                 conditions.extend(conditionsFull)
+                conditions = conditionsFull
+#                 conditions.extend(conditionsEq)
+#                 conditions.extend(conditionsLe)
+#                 conditions.extend(conditionsEdge)
+                result, required = self.find_required_conditions(solver, And(antCond, cubeNew), conditions)
+                if (not result):
+                    print("(conditions: full are sufficient)")
+                
+            if result:
+                print("(conditions: full are insufficient)")
+                assert(0)
+                
+            for c in required:
+                if c in conditionsEq:
+                    if s not in antecedent:
+                        antecedent[s] = []
+                    antecedent[s].append(c)
+                else:
+                    cubeSetNew.add(c)
+                cvars = c.get_free_variables()
+                cqvars = cvars.intersection(allVars)
+                for v in cqvars:
+                    if v not in qvarsOld:
+                        qvars.add(v)
+                        print("\tadding qv: %s" % pretty_serialize(v))
+                
+            cubeNew = And(cubeSetNew)
+        cubeSetNew = flatten_cube(cubeNew)
+        return cubeSetNew
+        
+    def boost_quorums(self, cubeSet, enum2qvar, antecedent, qvars, fIdx):
+        cubeNew = And(cubeSet)
+        consts = cubeNew.get_enum_constants()
+        antConditions = []
+        for v in antecedent.values():
+            for c in v:
+                antConditions.append(c)
+        antCond = And(antConditions)
+        qvarsOld = qvars.copy()
+
+#         print("(boosting ordered sorts)")
+        for sQ, rhs in self.system._quorums_sorts.items():
+            mem = rhs[0]
+            sA = rhs[1]
+            allConstsQ = self.system._enumsorts[sQ]
+            allConstsA = self.system._enumsorts[sA]
+            presentConstsQ = consts.intersection(allConstsQ)
+            presentConstsA = consts.intersection(allConstsA)
+            if len(presentConstsQ) == 0 and len(presentConstsA) == 0:
+                continue
+            
+            print("(boosting quorum sort: %s)" % sQ)
+            print("(quorum parent consts: %s)" % (pretty_print_set(presentConstsQ)))
+            print("(quorum child consts: %s)" % (pretty_print_set(presentConstsA)))
+            
+            subs = {}
+            vars2idxQ = {}
+            vars2idxA = {}
+            idx2varQ = []
+            idx2varA = []
+            allVarsQ = self.system._enum2qvar[sQ]
+            allVarsA = self.system._enum2qvar[sA]
+            qvarQ = []
+            qvarA = []
+            for idx, c in enumerate(allConstsQ):
+                if c in presentConstsQ:
+                    qv = allVarsQ[idx]
+                    subs[c] = qv
+                    vars2idxQ[qv] = idx
+                    idx2varQ.append(qv)
+                    qvars.add(qv)
+                    qvarQ.append(qv)
+                else:
+                    idx2varQ.append(None)
+            for idx, c in enumerate(allConstsA):
+                if c in presentConstsA:
+                    qv = allVarsA[idx]
+                    subs[c] = qv
+                    vars2idxA[qv] = idx
+                    idx2varA.append(qv)
+                    qvars.add(qv)
+                    qvarA.append(qv)
+                else:
+                    idx2varA.append(None)
+            enum2qvar[sQ] = qvarQ
+            enum2qvar[sA] = qvarA
+
+            cubeNew = cubeNew.simple_substitute(subs)
+            cubeSetNew = flatten_cube(cubeNew)
+            print("(cube: new)")
+            for c in cubeSetNew:
+                print("\t%s" % pretty_serialize(c))
+                
+            conditionsEq = []
+            conditionsEqQ = set()
+            conditionsEqA = set()
+            for i in range(0,len(idx2varQ)-1):
+                qvi = idx2varQ[i]
+                if qvi == None:
+                    continue
+                for j in range(i+1,len(idx2varQ)):
+                    qvj = idx2varQ[j]
+                    if qvj == None:
+                        continue
+                    assert(qvi != qvj)
+                    cond = Not(EqualsOrIff(qvi, qvj))
+                    conditionsEqQ.add(cond)
+                    conditionsEq.append(cond)
+            for i in range(0,len(idx2varA)-1):
+                qvi = idx2varA[i]
+                if qvi == None:
+                    continue
+                for j in range(i+1,len(idx2varA)):
+                    qvj = idx2varA[j]
+                    if qvj == None:
+                        continue
+                    assert(qvi != qvj)
+                    cond = Not(EqualsOrIff(qvi, qvj))
+                    conditionsEqA.add(cond)
+                    conditionsEq.append(cond)
+
+            conditionsPresent = []
+            conditionsAbsent = []
+            for i in range(0,len(idx2varQ)):
+                qvi = idx2varQ[i]
+                if qvi == None:
+                    continue
+                qvj = None
+                for j in range(0,len(idx2varA)):
+                    qvj = idx2varA[j]
+                    if qvj == None:
+                        continue
+                    cond = Function(mem, [qvj, qvi])
+                    if j in self.system._quorums_consts[sQ][i]:
+                        conditionsPresent.append(cond)
+                    else:
+                        cond = Not(cond)
+                        conditionsAbsent.append(cond)
+            conditionsFull = []
+            for i in range(0,len(allVarsQ)):
+                qvi = allVarsQ[i]
+                for j in range(0,len(allVarsA)):
+                    qvj = allVarsA[j]
+                    cond = Function(mem, [qvj, qvi])
+                    if j in self.system._quorums_consts[sQ][i]:
+                        conditionsFull.append(cond)
+                    else:
+                        cond = Not(cond)
+                        conditionsFull.append(cond)
+            print("(conditions: eq)")
+            for c in conditionsEq:
+                print("\t%s" % pretty_serialize(c))
+            print("(conditions: present)")
+            for c in conditionsPresent:
+                print("\t%s" % pretty_serialize(c))
+            print("(conditions: absent)")
+            for c in conditionsAbsent:
+                print("\t%s" % pretty_serialize(c))
+            print("(conditions: full)")
+            for c in conditionsFull:
+                print("\t%s" % pretty_serialize(c))
+                
+            solver = self.get_framesolver(fIdx)
+            result = True
+            conditions = []
+#             conditions.extend(conditionsEq)
+#             conditions.extend(conditionsPresent)
+#             conditions.extend(conditionsAbsent)
+#             conditions.extend(conditionsFull)
+            result, required = self.find_required_conditions(solver, And(antCond, cubeNew), conditions)
+            if (not result):
+                print("(conditions: none are sufficient)")
+#             assert(not result)
+            
+            if result and len(conditionsEq) != 0:
+                conditions.extend(conditionsEq)
+#                 conditions = conditionsEq
+                result, required = self.find_required_conditions(solver, And(antCond, cubeNew), conditions)
+                if (not result):
+                    print("(conditions: eq are sufficient)")
+                    
+            if result and len(conditionsPresent) != 0:
+                conditions.extend(conditionsPresent)
+#                 conditions = conditionsPresent
+                result, required = self.find_required_conditions(solver, And(antCond, cubeNew), conditions)
+                if (not result):
+                    print("(conditions: present are sufficient)")
+                    
+            if result and len(conditionsAbsent) != 0:
+                conditions.extend(conditionsAbsent)
+#                 conditions = conditionsAbsent
+                result, required = self.find_required_conditions(solver, And(antCond, cubeNew), conditions)
+                if (not result):
+                    print("(conditions: absent are sufficient)")
+                    
             if result and len(conditionsFull) != 0:
 #                 conditions.extend(conditionsFull)
                 conditions = conditionsFull
@@ -822,11 +1656,25 @@ class PDR(object):
                 assert(0)
                 
             for c in required:
-                cubeSetNew.add(c)
+                if c in conditionsEqQ:
+                    if sQ not in antecedent:
+                        antecedent[sQ] = []
+                    antecedent[sQ].append(c)
+                elif c in conditionsEqA:
+                    if sA not in antecedent:
+                        antecedent[sA] = []
+                    antecedent[sA].append(c)
+                else:
+                    cubeSetNew.add(c)
                 cvars = c.get_free_variables()
-                cqvars = cvars.intersection(allVars)
+                cqvars = cvars.intersection(allVarsQ)
                 for v in cqvars:
-                    if v not in qvars:
+                    if v not in qvarsOld:
+                        qvars.add(v)
+                        print("\tadding qv: %s" % pretty_serialize(v))
+                cqvars = cvars.intersection(allVarsA)
+                for v in cqvars:
+                    if v not in qvarsOld:
                         qvars.add(v)
                         print("\tadding qv: %s" % pretty_serialize(v))
                 
@@ -842,19 +1690,23 @@ class PDR(object):
             if c.node_type() == op.EQUALS:
                 lhs = c.arg(0)
                 rhs = c.arg(1)
-                if not rhs.is_symbol():
+                if (not rhs.is_symbol()) or (lhs in qvars):
                     lhs, rhs = rhs, lhs
-                if rhs.is_symbol:
+#                 print("lhs ", lhs)
+#                 print("rhs ", rhs)
+                if rhs.is_symbol and rhs in qvars:
                     if (common.gopts.const > 1) or (not lhs.is_function_application()):
                         rhst = rhs.symbol_type()
                         if rhst.is_enum_type() and rhs not in eqMap:
                             eqMap[rhs] = lhs
                             qvars.discard(rhs)
+#                             print("add1 %s -> %s" % (rhs, lhs))
 #                             incompleteSorts.add(rhst)
                             continue
                         elif rhs in ivars and rhs not in eqMap:
                             eqMap[rhs] = lhs
                             qvars.discard(rhs)
+#                             print("add2 %s -> %s" % (rhs, lhs))
                             continue
                         
             tmpSet.add(c)
@@ -1061,7 +1913,8 @@ class PDR(object):
 #         qf_f = self.qesolver.eliminate_quantifiers(f).simplify()
         qf_f = self.qesolver.eliminate_quantifiers(f)
 #         print("quantified: \n%s", f.serialize())
-#         print("quantifier-free: \n%s", qf.serialize())
+#         print("quantifier-free: \n%s", qf_f.serialize())
+#         assert(0)
         return qf_f
     
     def new_solver(self):
@@ -1322,16 +2175,18 @@ class PDR(object):
         return nFailed
 
     def check_and_prune_invariant(self, inv_set_l_orig, iter):
-        inv_set_l = inv_set_l_orig
-#         inv_set_l = set()
-#         for label, cl in inv_set_l_orig:
-#             clNew = self.system.replaceDefinitions(cl)
-#             inv_set_l.add((label, clNew))
+#         inv_set_l = inv_set_l_orig
+        inv_set_l = set()
+        label2orig = dict()
+        for label, cl in inv_set_l_orig:
+            clNew = self.system.replaceDefinitions(cl)
+            label2orig[label] = cl
+            inv_set_l.add((label, clNew))
         
         self.qtype = "inv"
         push_time()
         print(time_str(), "-------------------------------------------------")
-        pretty_print_inv(inv_set_l, "Invariant")
+        pretty_print_inv(inv_set_l_orig, "Invariant")
         
         nFailed = 0
         
@@ -1342,6 +2197,7 @@ class PDR(object):
         inv_all = And(inv_set)
         self.print_init_formula(inv_all)
         self.print_induct_formula(inv_all)
+#         assert(0)
         
         init_fail = self.check_init_implies_invariant(inv_set_l)
         nFailed += len(init_fail)
@@ -1357,9 +2213,11 @@ class PDR(object):
         failedProp = False
         for label, cl in inv_set_l:
             if cl in inv_pruned:
-                inv_pruned_l.add((label, cl))
+                cl_orig = label2orig[label]
+                inv_pruned_l.add((label, cl_orig))
             elif (cl == prop_formula(self) or cl in self.system.curr._prop):
-                inv_pruned_l.add((label, cl))
+                cl_orig = label2orig[label]
+                inv_pruned_l.add((label, cl_orig))
                 failedProp = True
         
         print()
@@ -1409,17 +2267,20 @@ class PDR(object):
         inv_set = set()
         inv_set_l = set()
         prop = prop_formula(self)
+        label2orig = dict()
         for label, v in inv_set_orig_l:
+            label2orig[label] = v
             if (v == prop) or (v in self.system.curr._prop):
                 pass
             else:
-                f = self.system.replaceDefinitions(v, 1)
-                inv_set.add(f)
-                inv_set_l.add((label, f))
+                cl = self.system.replaceDefinitions(v, 1)
+                cl_formula = self.get_formula_qf(cl)
+                inv_set.add(cl_formula)
+                inv_set_l.add((label, cl_formula))
         
         push_time()
         print(time_str(), "-------------------------------------------------")
-        pretty_print_inv(inv_set_l, "Checking reusability of clauses")
+        pretty_print_inv(inv_set_orig_l, "Checking reusability of clauses")
 
         nFailed = 0
 
@@ -1435,7 +2296,8 @@ class PDR(object):
         inv_pruned_l = set()
         for label, cl in inv_set_l:
             if cl in inv_pruned:
-                inv_pruned_l.add((label, cl))
+                cl_orig = label2orig[label]
+                inv_pruned_l.add((label, cl_orig))
             
         print()
         print("Finite sorts: #%d" % len(self.system._sort2fin))
@@ -1544,7 +2406,8 @@ class PDR(object):
                     otherIdx = 0
                     labels = set()
                     count = 0
-                    for idx, cl in enumerate(inv_set):
+                    inv_sorted = sorted(inv_set, key=lambda v: formula_key(v))
+                    for idx, cl in enumerate(inv_sorted):
                         label = str(idx+1)
                         if cl == prop or cl in self.system.curr._prop:
                             propIdx += 1
@@ -1570,6 +2433,8 @@ class PDR(object):
                         print("--> Error!")
                         assert(0)
                         
+                    if self.exp:
+                        assert(0)
                     print("--> The system is safe!")
                     return inv_set_l, None
                 
@@ -1969,6 +2834,7 @@ class PDR(object):
         return (cubeValues, globValues)
 
     def print_cube_values(self, srcValues, fIdx, destValues):
+        self.system.modified = set()
         if (self.verbose < 4):
             return
         if fIdx == -1:
@@ -1999,8 +2865,10 @@ class PDR(object):
                 rhs = cubeValues[lhs]
                 if lhs in cubeValuesDest:
                     if (rhs == cubeValuesDest[lhs]):
-                        print("\t%s = %s" % (pretty_print_str(lhs), pretty_print_str(rhs)))
+#                         print("\t%s = %s" % (pretty_print_str(lhs), pretty_print_str(rhs)))
                         continue
+                eq = pre2nex(self, EqualsOrIff(lhs, rhs))
+                self.system.modified.add(eq)
                 print("\t%s = %s\t\t\t--> modified" % (pretty_print_str(lhs), pretty_print_str(rhs)))
             for lhs in sorted(globValues.keys(), key=str):
                 rhs = globValues[lhs]
@@ -2011,8 +2879,11 @@ class PDR(object):
                                pretty_print_str(rhs),
                                pretty_print_str(globValuesDest[lhs])))
 #                         assert(0)
-                    print("\t%s = %s" % (pretty_print_str(lhs), pretty_print_str(rhs)))
+#                     print("\t%s = %s" % (pretty_print_str(lhs), pretty_print_str(rhs)))
                     continue
+                eq = pre2nex(self, EqualsOrIff(lhs, rhs))
+                self.system.modified.add(eq)
+                assert(0)
                 print("\t%s = %s\t\t\t--> modified" % (pretty_print_str(lhs), pretty_print_str(rhs)))
 #             print("\t(other literals same as previous cube)")
         print("")
@@ -2076,11 +2947,15 @@ class PDR(object):
         return not self.solve_formula(self.get_framesolver(0), Not(pre2nex(self, cl)))
 
     def get_state_value(self, f, model):
+#         print("val: %s" % (f))
         return model.get_value(f)
 
     def get_relation_value(self, s, args, model):
         f = Function(s, args)
         value = self.get_state_value(f, model)
+        if self.quorums == "symmetric" and self.system.is_quorum_symbol(s):
+            assert(value == TRUE() or value == FALSE())
+            return TRUE()
         if self.ordered == "partial" and self.system.curr.is_ordered_state(s):
             assert(value == TRUE() or value == FALSE())
             return TRUE()
@@ -2101,7 +2976,10 @@ class PDR(object):
 #             assert(value == TRUE() or value == FALSE())
 #             if (value == FALSE()):
 #                 return TRUE()
-        return self.get_predicate_value(f, model)
+#         return self.get_predicate_value(f, model)
+#         print("%s -> %s" % (f, value))
+        eq = EqualsOrIff(f, value)
+        return eq
 
     def get_predicate_value(self, f, model):
         value = self.get_state_value(f, model)
@@ -2299,7 +3177,7 @@ class PDR(object):
                 sorts[k] = v
             for k, v in self.system._enumsorts.items():
                 sorts[k] = v
-#            print("\tmodel isorts: %s" % isorts)
+#             print("\tmodel isorts: %s" % isorts)
 #             print("\tmodel sorts: %s" % sorts)
             
             conditions = []
@@ -2351,6 +3229,10 @@ class PDR(object):
 #             assert(0)
 
             for s in self.system.curr._states:
+                if self.eval_wires:
+                    if s in self.system.curr._definitionMap:
+                        continue
+                
 #                 print("Symbol: ", s)
                 s_type = s.symbol_type()
 
@@ -2644,7 +3526,92 @@ class PDR(object):
         solver.pop()
         z3.set_param('smt.core.minimize', False)
         return allMus
-           
+
+    def reduce_core(self, solver, formula, assumptionsIn):
+        assumptions = sorted(assumptionsIn, key=lambda v: (self.system.get_dependency_priority(v, self.use_wires), str(v)))
+        if self.random > 1:
+            random.shuffle(assumptions)
+        
+        solver.push()
+        solver.add_assertion(And(formula))
+        
+        solver.push()
+        solver.reset_named_assertions()
+        
+        assumptionMap = {}
+        for i in assumptions:
+#             d = 0
+            d = self.system.get_dependency_priority(i, self.use_wires)
+            if d not in assumptionMap:
+                assumptionMap[d] = list()
+            assumptionMap[d].append(i)
+        
+        result = True
+        
+        count = 0
+        for d in sorted(assumptionMap.keys()):
+            v = assumptionMap[d]
+            if self.random > 1:
+                random.shuffle(v)
+            for i  in v:
+                count += 1
+                solver.add_assertion(i, "assume" + str(i))
+                print("\tassume (%s): %s" % (d, pretty_print_str(i)))
+#                 if (count == self.cutoff) and (count != 0):
+#                     count = 0
+#                     print("\tchecking")
+#                     result = self.solve_formula(solver, TRUE(), True)
+                if not result:
+                    break
+            if self.use_wires and (count != 0) and (count >= self.cutoff):
+                count = 0
+                print("\tchecking")
+                result = self.solve_formula(solver, TRUE(), True)
+            if not result:
+                break
+        if result:
+            result = self.solve_formula(solver, TRUE(), True)
+        assert(not result)
+    
+        self.update_stat("unsat-core")
+        core = list(self.last_solver.get_unsat_core())
+        self.update_stat("sz-unsat-core-sum", len(core))
+        solver.pop()
+        
+        if len(core) != 0:
+            solver.push()
+            required = set()
+            assumptions = core
+            while len(assumptions) != 0:
+                if self.random > 2:
+                    random.shuffle(assumptions)
+                curr = assumptions.pop()
+                if self.use_z3_minimize:
+                    required.add(curr)
+                    continue
+                solver.push()
+                solver.reset_named_assertions()
+                for i in assumptions:
+                    solver.add_assertion(i, "assume" + str(i))
+                res = self.check_query(solver)
+                if res:
+                    solver.pop()
+                    required.add(curr)
+                    solver.add_assertion(curr)
+                else:
+                    tmpCore = list(self.last_solver.get_unsat_core())
+                    solver.pop()
+                    for i in assumptions:
+                        if i not in tmpCore:
+                            assumptions.remove(i)
+            solver.pop()
+            core = list(required)
+        solver.pop()
+        for i  in core:
+            print("\trequired: %s" % pretty_print_str(i))
+        return core
+    
+               
     def solve_with_core(self, fIdx, formula, assume):
         self.qtype = "blo"
         """Provides a satisfiable assignment is SAT, else return unsat core"""
@@ -2665,15 +3632,14 @@ class PDR(object):
             assumption = arg
             if arg != TRUE():
                 assumptions.append(assumption)
-        if self.random > 1:
-            random.shuffle(assumptions)
         assumptions = self.get_formulae(assumptions)
         
-        if True or self.use_wires:
-            assumptions = sorted(assumptions, key=lambda v: (self.system.get_dependency_priority(v, self.use_wires), str(v)))
-        else:
-            assumptions = sorted(assumptions, key=lambda v: str(v))
+        assumptions = sorted(assumptions, key=lambda v: (self.system.get_dependency_priority(v, self.use_wires), str(v)))
+#         assumptions = sorted(assumptions, key=lambda v: str(v))
 
+#         if self.eval_wires and self.use_wires:
+#             assumptions = self.eval_engine.process_model(assumptions)
+        
         if self._print:
             print("# assumptions: %d" % len(assumptions))
             print("f: %s" % formula.serialize())
@@ -2689,34 +3655,186 @@ class PDR(object):
         
         solver.push()
         solver.reset_named_assertions()
+
+        assumptionMap = {}
+        for i in assumptions:
+            d = 0
+            if self.use_wires:
+                d = self.system.get_dependency_priority(i, self.use_wires)
+            if d not in assumptionMap:
+                assumptionMap[d] = list()
+            assumptionMap[d].append(i)
         
         result = True
         cube = None
-
-        dLast = 0
-        for i in assumptions:
-            if self.use_wires:
-                d = self.system.get_dependency_priority(i, self.use_wires)
-                if dLast != d:
-                    result = self.solve_formula(solver, TRUE(), True)
-                dLast = d
+        
+#         print("\tchecking")
+#         result = self.solve_formula(solver, TRUE(), True)
+#         assert(result)
+        
+        count = 0
+        for d in sorted(assumptionMap.keys()):
+            v = assumptionMap[d]
+            if self.random > 1:
+                random.shuffle(v)
+            for i  in v:
+                count += 1
+                solver.add_assertion(i, "assume" + str(i))
+                print("\tassume (%s): %s" % (d, pretty_print_str(i)))
+#                 if (count == self.cutoff) and (count != 0):
+#                     count = 0
+#                     print("\tchecking")
+#                     result = self.solve_formula(solver, TRUE(), True)
                 if not result:
                     break
-#                 print("\tassume (%d): %s" % (d, pretty_print_str(i)))
-            solver.add_assertion(i, "assume" + str(i))
+            if self.use_wires and (count != 0) and (count >= self.cutoff):
+                count = 0
+                print("\tchecking")
+                result = self.solve_formula(solver, TRUE(), True)
+            if not result:
+                break
             
         if result:
             cube = self.solve_with_model(solver, TRUE(), assumptions, True)
             if cube is None:
                 result = False
-#         assert(0)
-        
-        ucore = []
-        if cube is None:
-            assert(not result)
+        core = None
+        if not result:
             print(time_str(), "\tAns. UNSAT")
             self.update_stat("unsat-core")
             core = list(self.last_solver.get_unsat_core())
+            self.update_stat("sz-unsat-core-sum", len(core))
+        solver.pop()
+            
+#         assert(0)
+        
+        if self.eval_wires and self.use_wires:
+            if cube is None:
+                assert(not result)
+                
+                solver.push()
+                required = set()
+                assumptions = core
+                while len(assumptions) != 0:
+                    if self.random > 2:
+                        random.shuffle(assumptions)
+                    curr = assumptions.pop()
+                    if self.use_z3_minimize:
+                        required.add(curr)
+                        continue
+                    solver.push()
+                    solver.reset_named_assertions()
+                    for i in assumptions:
+                        solver.add_assertion(i, "assume" + str(i))
+                    res = self.check_query(solver)
+                    if res:
+                        solver.pop()
+                        required.add(curr)
+                        solver.add_assertion(curr)
+                    else:
+                        tmpCore = list(self.last_solver.get_unsat_core())
+                        solver.pop()
+                        for i in assumptions:
+                            if i not in tmpCore:
+                                assumptions.remove(i)
+                solver.pop()
+                core = list(required)
+                sMus = And(core)
+                
+#                 print("(required)")
+#                 for c in required:
+#                     print("\t%s" % pretty_serialize(c))
+                    
+                assumptions = core
+                assumptionsWires, hasWires = self.eval_engine.process_model(assumptions)
+                if hasWires:
+                    assumptions = self.reduce_core(solver, assumptionsWires, assumptions)
+                    assumptionsWires = self.reduce_core(solver, assumptions, assumptionsWires)
+                    for v in assumptionsWires:
+                        assumptions.append(v)
+                    core = list(assumptions)
+                    wMus = And(core)
+                    
+                    consts = wMus.get_enum_constants()
+                    for sQ, rhs in self.system._quorums_sorts.items():
+                        sA = rhs[1]
+                        allConstsQ = self.system._enumsorts[sQ]
+                        allConstsA = self.system._enumsorts[sA]
+                        presentConstsQ = consts.intersection(allConstsQ)
+                        presentConstsA = consts.intersection(allConstsA)
+                        if len(presentConstsQ) != 0 and len(presentConstsA) != 0:
+                            core = list(required)
+                            assumptions = core
+                            print("(restoring state mus)")
+            
+#                     sConsts = sMus.get_enum_constants()
+#                     wConsts = wMus.get_enum_constants()
+#                     if len(sConsts) < len(wConsts):
+#                         core = list(required)
+#                         assumptions = core
+#                         print("(restoring state mus) %d vs %s" % (len(sConsts), len(wConsts)))
+                
+                if False:
+#                 if hasWires:
+                    assumptions = sorted(assumptions, key=lambda v: (self.system.get_dependency_priority(v, self.use_wires), str(v)))
+                    if self.random > 1:
+                        random.shuffle(assumptions)
+                
+                    solver.push()
+                    solver.reset_named_assertions()
+                    
+                    assumptionMap = {}
+                    for i in assumptions:
+#                         d = 0
+                        d = self.system.get_dependency_priority(i, self.use_wires)
+                        if d not in assumptionMap:
+                            assumptionMap[d] = list()
+                        assumptionMap[d].append(i)
+                    
+                    result = True
+                    cube = None
+                    
+    #                 print("\tchecking")
+    #                 result = self.solve_formula(solver, TRUE(), True)
+    #                 assert(result)
+                    
+                    count = 0
+                    for d in sorted(assumptionMap.keys()):
+                        v = assumptionMap[d]
+                        if self.random > 1:
+                            random.shuffle(v)
+                        for i  in v:
+                            count += 1
+                            solver.add_assertion(i, "assume" + str(i))
+                            print("\tassume (%s): %s" % (d, pretty_print_str(i)))
+            #                 if (count == self.cutoff) and (count != 0):
+            #                     count = 0
+            #                     print("\tchecking")
+            #                     result = self.solve_formula(solver, TRUE(), True)
+                            if not result:
+                                break
+                        if self.use_wires and (count != 0) and (count >= self.cutoff):
+                            count = 0
+                            print("\tchecking")
+                            result = self.solve_formula(solver, TRUE(), True)
+                        if not result:
+                            break
+                
+                
+                    if result:
+                        cube = self.solve_with_model(solver, TRUE(), assumptions, True)
+                        assert(cube is None)
+                        result = False
+                    assert(not result)
+                    print(time_str(), "\tAns. UNSAT")
+                    self.update_stat("unsat-core")
+                    core = list(self.last_solver.get_unsat_core())
+                    self.update_stat("sz-unsat-core-sum", len(core))
+                    solver.pop()
+
+        ucore = []
+        if cube is None:
+            assert(not result)
 #             print("\nz3 unsat core #%d" % len(core))
 #             for c in core:
 #                 print("\t%s" % c)
@@ -2726,9 +3844,6 @@ class PDR(object):
 #             for c in core:
 #                 print("\t%s" % pretty_serialize(c))
                 
-            self.update_stat("sz-unsat-core-sum", len(core))
-            solver.pop()
-            
 #             allMus = self.marco(fIdx, solver, assumptions)
 #             print("(unsat cores #%s)" % len(allMus))
 #             for idx, mus in enumerate(allMus):
@@ -2829,7 +3944,6 @@ class PDR(object):
         else:
             assert(result)
             print(time_str(), "\tAns. SAT")
-            solver.pop()
             solver.reset_named_assertions()
             solver.pop()
         return cube, ucore
@@ -2839,6 +3953,8 @@ class PDR(object):
         return not self.solve_formula(self.solver, And(lhs, Not(rhs)))
 
     def check_if_global(self, core, corepre):
+        if not self.check_global:
+            return False
         self.qtype = "glo"
         isSat = self.solve_formula(self.solver, And(Not(corepre), prop_formula(self), core), True)
         return not isSat
@@ -2929,6 +4045,32 @@ class PDR(object):
                 if res2:
                     return True
 
+    def reduce_clause(self, solver, cl_orig):
+        cl = cl_orig
+        updated = False
+        if cl.is_exists():
+            print("cl: %s" % pretty_print_str(cl))
+            qvars = cl.quantifier_vars()
+            body_nex = pre2nex(self, cl.arg(0))
+            lits = flatten_and(body_nex)
+            lits_qf = list()
+            for l in lits:
+                l_qf = self.get_formula_qf(l)
+                lits_qf.append(l_qf)
+            core = self.reduce_core(solver, TRUE(), lits_qf)
+            if len(lits_qf) != len(core):
+                updated = True
+                cl = nex2pre(self, And(core))
+                cl_vars = cl.get_free_variables()
+                qvars_new = cl_vars.intersection(qvars)
+                if len(qvars_new) != 0:
+                    cl = Exists(qvars_new, cl)
+                print("(original clause): %s" % pretty_print_str(cl_orig))
+                print("(reduced clause): %s" % pretty_print_str(cl))
+#                eprint("(reduced clause): %s" % pretty_print_str(cl))
+#                 assert(0)
+        return cl, updated
+
     def inductive(self):
         """Checks if frames have converged """
         
@@ -2966,7 +4108,24 @@ class PDR(object):
                     if len(forwarded) != 0:
                         print("Forwarded #%d to F[%d]" % (len(forwarded), i+1))
                         for cl, cl_formula in forwarded:
-                            self.learn_cube(i+1, cl, cl_formula)
+                            if self.reduce == 1:
+                                cl_qu = self.get_formula_qu(cl)
+                                clNew, updated = self.reduce_clause(framesolver, cl_qu)
+                                if updated:
+                                    clNew_formula = self.get_formula_qf(clNew)
+                                    self.learn_cube(i+1, clNew, clNew_formula)
+                                else:
+                                    self.learn_cube(i+1, cl, cl_formula)
+                            else:
+                                self.learn_cube(i+1, cl, cl_formula)
+                    if self.reduce == 2:
+                        for cl in self.frames[i]:
+                            cl_qu = self.get_formula_qu(cl)
+                            clNew, updated = self.reduce_clause(self.get_framesolver(i-1), cl_qu)
+                            if updated:
+                                clNew_formula = self.get_formula_qf(clNew)
+                                self.learn_cube(i, clNew, clNew_formula)
+                            
                 if (i != N-1) and len(self.frames[i]) == 0:
                     print(time_str(), "F[%d] converged!" % i)
 #                     print("F[%d] = " % i, self.frames[i])
@@ -3031,7 +4190,7 @@ class PDR(object):
         for label, v in inv_list_orig:
             outF, outE = count_quantifiers(v)
 #             cost = outF + 1000*outE
-            cost = formula_cost(v)
+            cost = formula_cost(self, v)
             print("raw invariant [%s] (cost: %d, %dF, %dE) \t%s" % (label, cost, outF, outE, v))
             inv_list.append((cost, label, v))
             
@@ -3107,7 +4266,6 @@ def backwardReach(fname, system=None):
         iterationCount += 1
         inv_set_l = None
         cex = None
-        forceMinimize = False
         forceReset = False
         nFailed = 0
         nFailed_ind = 0
@@ -3131,7 +4289,7 @@ def backwardReach(fname, system=None):
             inv_set_l = set()
             inv_set_optional_l = set()
             inv_set_l, cex = p.check_property(helpers)
-            if inv_set_l != None and common.gopts.min == 2:
+            if inv_set_l != None and common.gopts.min >= 1:
                 inv_full_fin = []
                 prop = prop_formula(p)
                 for label, cl in inv_set_l:
@@ -3139,9 +4297,9 @@ def backwardReach(fname, system=None):
                         inv_full_fin.insert(0, (label, cl))
                         continue
                     inv_full_fin.append((label, cl))
-                eprint(time_str(), "Minimizing...")
+#                 eprint(time_str(), "Minimizing...")
                 inv_minimized_fin, inv_optional_fin = p.minimize_invariant(inv_full_fin)
-                eprint(time_str(), "Minimized proof certificate (finite) of size %d." % len(inv_minimized_fin))
+                eprint(time_str(), "Proof certificate (finite) of size %d." % len(inv_minimized_fin))
 #                 p.print_stats()
                 pretty_print_inv(inv_minimized_fin, "Proof certificate (required)")
                 invSz = len(inv_minimized_fin)
@@ -3155,6 +4313,17 @@ def backwardReach(fname, system=None):
                 for label, cl in inv_optional_fin:
                     inv_set_optional_l.add((label, cl))
                 
+            if common.gopts.finv == 1:
+                invName = "%s/%s.finv" % (common.gopts.out, common.gopts.name)
+                eprint("\t(finite invariant file: %s)" % invName)
+                print("\t(finite invariant file: %s)" % invName)
+                common.gopts.invF = open(invName, "w")
+                currSizes = print_sizes3(p)
+                print("s:\t%s" % currSizes, file=common.gopts.invF)
+                pretty_print_finv_file(common.gopts.invF, inv_minimized_fin)
+                common.gopts.invF.close()
+                exit()
+        
         last_tsb = p.system.get_num_state_bits()
         p.print_stats()
         if inv_set_l == None:
@@ -3238,13 +4407,13 @@ def backwardReach(fname, system=None):
                 set_solver(p)
                 
                 inv_set_ind_l = set()
-                inv_set_all_ind_l = set()
+#                 inv_set_all_ind_l = set()
                 for label, i in inv_set_inf_l:
                     i_ind = i.fsubstitute()
                     inv_set_ind_l.add((label, i_ind))
-                for label, i in inv_set_all_inf_l:
-                    i_ind = i.fsubstitute()
-                    inv_set_all_ind_l.add((label, i_ind))
+#                 for label, i in inv_set_all_inf_l:
+#                     i_ind = i.fsubstitute()
+#                     inv_set_all_ind_l.add((label, i_ind))
                 
 #                 nFailed_s, inv_pruned_ind = p.check_and_prune_invariant(inv_set_ind, 0)
 #                 if nFailed_s != 0 and len(inv_set_all_ind) != len(inv_set_ind):
@@ -3296,18 +4465,23 @@ def backwardReach(fname, system=None):
             set_solver(p)
             
         if nFailed == 0:
-#             set_problem(p, True)
-#             set_solver(p)
-            nFailed, inv_pruned_inf_l = p.check_and_prune_invariant(inv_set_check_inf_l, 0)
-            if nFailed != 0 and len(inv_set_all_inf_l) != len(inv_set_inf_l):
-                nFailed, inv_pruned_inf_l = p.check_and_prune_invariant(inv_set_all_inf_l, 0)
-                if common.gopts.gen == "epr_strict":
-                    forceMinimize = True
-
+            if p.unbounded_checks:
+#                 set_problem(p, True)
+#                 set_solver(p)
+                nFailed, inv_pruned_inf_l = p.check_and_prune_invariant(inv_set_check_inf_l, 0)
+                if nFailed != 0 and len(inv_set_all_inf_l) != len(inv_set_inf_l):
+                    nFailed, inv_pruned_inf_l = p.check_and_prune_invariant(inv_set_all_inf_l, 0)
+            else:
+                inv_pruned_inf_l = inv_set_check_inf_l
+                
         if nFailed == 0:
             if common.gopts.verbosity > 0:
-                eprint(time_str(), "(unbounded induction checks passed)")
-                print(time_str(), "(unbounded induction checks passed)")
+                if p.unbounded_checks:
+                    eprint(time_str(), "(unbounded induction checks passed)")
+                    print(time_str(), "(unbounded induction checks passed)")
+                else:
+                    eprint(time_str(), "(unbounded induction checks skipped)")
+                    print(time_str(), "(unbounded induction checks skipped)")
             result = "safe"
             done = True
             eprint("Finite sorts (final): #%d" % len(p.system._fin2sort))
@@ -3325,18 +4499,11 @@ def backwardReach(fname, system=None):
             p.print_stats()
             pretty_print_inv(inv_full_inf, "Proof certificate")
             
-            invName = "%s/%s.inv" % (common.gopts.out, common.gopts.name)
-            eprint("\t(invariant file: %s)" % invName)
-            print("\t(invariant file: %s)" % invName)
-            common.gopts.invF = open(invName, "w")
-            pretty_print_inv_file(common.gopts.invF, inv_full_inf)
-            common.gopts.invF.close()
-    
             inv_final = inv_full_inf
             invSz = len(inv_final)
             print_stat("sz-invariant-ic3", invSz)
             eprint(time_str(), "Property proved. Proof certificate of size %d" % len(inv_full_inf))
-            if forceMinimize or (common.gopts.min == 1):
+            if (common.gopts.min >= 2):
                 eprint(time_str(), "Minimizing...")
                 inv_minimized_inf, inv_optional_inf = p.minimize_invariant(inv_full_inf)
                 inv_final = inv_minimized_inf
@@ -3347,6 +4514,13 @@ def backwardReach(fname, system=None):
                     pretty_print_inv(inv_optional_inf, "Optional invariants", "_optional")
 #                 p.print_smt2_set(inv_minimized)
             
+            invName = "%s/%s.inv" % (common.gopts.out, common.gopts.name)
+            eprint("\t(invariant file: %s)" % invName)
+            print("\t(invariant file: %s)" % invName)
+            common.gopts.invF = open(invName, "w")
+            pretty_print_inv_file(common.gopts.invF, inv_final)
+            common.gopts.invF.close()
+    
             totalF = 0
             totalE = 0
             totalA = 0
@@ -3361,7 +4535,7 @@ def backwardReach(fname, system=None):
                 totalE += outE
                 totalA += outA
                 totalC += outC
-                print("invariant [%s] (%dF, %dE, %dA, %dC) \t%s" % (label, outF, outE, outA, outC, pretty_print_str(v)))
+                print("invariant [%s] (%dF, %dE, %dA, %dC) \t%s" % (label, outF, outE, outA, outC, pretty_print_str(f)))
             print("###\n")
             print_stat("sz-invariant", totalC)
             print_stat("sz-invariant-forall", totalF)
@@ -3389,14 +4563,16 @@ def backwardReach(fname, system=None):
             print(time_str(), "(removed %d long clauses)" % len(long_clauses))
 
         for label, cl in inv_set_inf_l:
+#         for label, cl in inv_set_all_inf_l:
             if cl not in long_clauses:
                 reuse_set.add((label, cl))
             else:
                 print("\t\t", end='')
                 pretty_print(cl)
 
+        allowReuse = common.gopts.reuse > 0
         inv_reusable_l = set()
-        if common.gopts.reuse > 0:
+        if allowReuse and p.reuse_inf_en:
             inv_reusable_l = p.reusable_invariant(reuse_set)
         
         p.print_stats()
@@ -3453,6 +4629,7 @@ def backwardReach(fname, system=None):
                             print(time_str(), "(rerunning SymIC3 with increased base size)")
                         
                     if forceReset:
+                        allowReuse = False
                         inv_reusable_l.clear()
                         eprint(time_str(), "(cleanup)")
                         print(time_str(), "(cleanup)")
@@ -3478,13 +4655,22 @@ def backwardReach(fname, system=None):
             eprint("\t|%s| = %s" % (tt, len(p.system._enumsorts[vals])))
 
         p.system.set_curr()
-        helpers = set()
-        for label, i in inv_reusable_l:
-            cl = i.fsubstitute()
-            helpers.add((label, cl))
-
         set_problem(p)
         set_solver(p)
+        
+        helpers = set()
+        if allowReuse:
+            if not p.reuse_inf_en:
+                reuse_set_fin = set()        
+                for label, cl in reuse_set:
+                    cl_fin = cl.fsubstitute()
+                    reuse_set_fin.add((label, cl_fin))
+                inv_reusable_l = p.reusable_invariant(reuse_set_fin)
+            for label, cl in inv_reusable_l:
+                if p.reuse_inf_en:
+                    cl = cl.fsubstitute()
+                helpers.add((label, cl))
+
     print_stat("result-ic3po", result)
     p.print_stats(print_stat)
 

@@ -20,18 +20,21 @@ DEFAULT_TIMEOUT=3600
 DEFAULT_MEMOUT=64000
 DEFAULT_PRINT_WITNESS=True
 DEFAULT_MODE="ic3po"
-DEFAULT_MINIMIZE=2
-DEFAULT_QF=0
-DEFAULT_GEN="prefer_epr"
+DEFAULT_MINIMIZE=1
+DEFAULT_QF=3
+DEFAULT_GEN="fef"
 DEFAULT_RANDOM=0
-DEFAULT_SEED=0
+DEFAULT_SEED=1
 DEFAULT_INITSZ=-1
 DEFAULT_SUBSUME=1
 DEFAULT_REUSE=1
 DEFAULT_OPTIMIZE=1
 DEFAULT_CONST=1
 DEFAULT_WIRES=1
-DEFAULT_VERBOSITY=0
+DEFAULT_VERBOSITY=1
+DEFAULT_FINV=0
+DEFAULT_SIZE="default"
+DEFAULT_RANGEBOOST=1
 
 def getopts(header):
 	p = argparse.ArgumentParser(description=str(header), formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -53,6 +56,9 @@ def getopts(header):
 	p.add_argument('--witness',         help='toggles printing witness (default: %r)' % DEFAULT_PRINT_WITNESS, action="count", default=DEFAULT_PRINT_WITNESS)
 	p.add_argument('--qf', 				help='use quantifier free queries (between 0-2) (default: %r)' % DEFAULT_QF, type=int, default=DEFAULT_QF)
 	p.add_argument('--init', 			help='initial size (use -1 to use vmt size) (default: %r)' % DEFAULT_INITSZ, type=int, default=DEFAULT_INITSZ)
+	p.add_argument('--finv', help='use 1 to exit after printing the finite invariant for safe property (default: %r)' % DEFAULT_FINV, type=int, default=DEFAULT_FINV)
+	p.add_argument('--rb', help='use 1 to enable RangeBoost (default: %r)' % DEFAULT_RANGEBOOST, type=int, default=DEFAULT_RANGEBOOST)
+	p.add_argument('--size', help='finite size (, separated)', type=str, default=DEFAULT_SIZE)
 	p.add_argument('-v', '--verbosity', help='verbosity level (default: %r)' % DEFAULT_VERBOSITY, type=int, default=DEFAULT_VERBOSITY)
 	args, leftovers = p.parse_known_args()
 	return args, p.parse_args()
@@ -115,7 +121,7 @@ def main():
 		shutil.copyfile(str(opts.file), ivy_file)
 		vmt_file = "%s/%s.vmt" % (out_dir, opts.name)
 
-		command = "python2.7 "
+		command = "python2 "
 		ivy2vmtFile = "%s/%s" % (tool_dir, IVY2VMT)
 		if not os.path.isfile(ivy2vmtFile):
 			raise Exception("Missing ivy2vmt file: %s" % ivy2vmtFile)
@@ -129,7 +135,7 @@ def main():
 		if (s != 0):
 			raise Exception("conversion error: return code %d" % s)
 	
-	command = "python2.7 -u "
+	command = "python2 -u "
 # 	command = "python2 -m cProfile "
 	topFile = "%s/%s" % (tool_dir, IC3PO)
 	if not os.path.isfile(topFile):
@@ -147,6 +153,10 @@ def main():
 	command += " --opt %s" % opts.opt
 	command += " --const %s" % opts.const
 	command += " --init %s" % opts.init
+	command += " --wires %s" % opts.wires
+	command += " --finv %s" % opts.finv
+	command += " --size %s" % opts.size
+	command += " --rb %s" % opts.rb
 	command += " -v %s" % opts.verbosity
 	command += " -o %s" % out_dir
 	command += " -n %s" % opts.name

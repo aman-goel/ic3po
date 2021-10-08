@@ -13,6 +13,7 @@ import sys
 import time
 import common
 import math
+import re
 
 from pysmt.pretty_printer import pretty_serialize
 from pysmt.shortcuts import *
@@ -128,6 +129,17 @@ def pretty_print_inv_file(invF, inv_list, comment="Proof certificate"):
         print("invariant [ic3po_%s]\t" % label, end='', file=invF)
         print(pretty_print_str(cl, mode=1, reset=False), file=invF)
     print("###", file=invF)
+
+def pretty_print_finv_file(invF, inv_list, comment=""):
+    print("n:\t%d" % (len(inv_list)), file=invF)
+    for label, cl in inv_list:
+#         print("invariant [ic3po_%s]\t" % label, end='', file=invF)
+        if label.startswith("prop"):
+            print("p:\t", end='', file=invF)
+        else:
+            print("i:\t", end='', file=invF)
+        print(pretty_print_str(cl, mode=0, reset=False), file=invF)
+#     print("###", file=invF)
 
 #     def print_smt2(self, cl):
 #         solver = Solver(name="z3")
@@ -269,36 +281,42 @@ def count_and(formula):
     flat = flatten_and(f)
     return len(flat)
  
-def formula_cost(formula, pol=True, inC=0):
-    factor = 1
+def formula_cost_rec(formula, pol=True, inC=0):
+    factor = 10
     outC = inC
 #     print("formula: %s %s %d %d" % (formula, pol, outF, outE))
+    outC += len(formula.args())
     if formula.is_not():
-        outC = formula_cost(formula.arg(0), not pol, outC)
+        outC = formula_cost_rec(formula.arg(0), not pol, outC)
         return outC
     if formula.is_implies():
-        outC = formula_cost(formula.arg(0), not pol, outC)
-        outC = formula_cost(formula.arg(1), pol, outC)
+        outC = formula_cost_rec(formula.arg(0), not pol, outC)
+        outC = formula_cost_rec(formula.arg(1), pol, outC)
         return outC
     is_e = formula.is_exists()
     is_a = formula.is_forall()
     if (is_e and pol) or (is_a and not pol):
         qvars = formula.quantifier_vars()
         if inC > 0:
-            factor = 100
+            factor = 1000
         outC += factor*len(qvars)
     if (is_e and not pol) or (is_a and pol):
         qvars = formula.quantifier_vars()
-        if inC > 100:
-            factor = 10
+        if inC > 1000:
+            factor = 100
         outC += factor*len(qvars)
     for arg in formula.args():
-        outC = formula_cost(arg, pol, outC)
+        outC = formula_cost_rec(arg, pol, outC)
     if formula.is_ite():
-        outC = formula_cost(formula.arg(0), not pol, outC)
+        outC = formula_cost_rec(formula.arg(0), not pol, outC)
     if formula.is_iff() or formula.is_equals():
-        outC = formula_cost(formula.arg(0), not pol, outC)
-        outC = formula_cost(formula.arg(1), not pol, outC)
+        outC = formula_cost_rec(formula.arg(0), not pol, outC)
+        outC = formula_cost_rec(formula.arg(1), not pol, outC)
+    if formula.is_function_application():
+        formulaType = formula.function_name()
+        factor = 10000
+        if str(formulaType).startswith("member:"):
+            outC += factor
     return outC   
 
 def binom(n, k):
@@ -338,11 +356,11 @@ def substituteDefinitions(formula, defMap, mode=0):
         return Or(args)
     if formula.is_function_application():
         formulaType = formula.function_name()
-        if str(formulaType) in defMap:
-            entry = defMap[str(formulaType)]
-            assert(len(entry) == 4)
-            largs = entry[1]
-            rhs = entry[-1]
+        if formulaType in defMap:
+            entry = defMap[formulaType]
+            assert(len(entry) == 3)
+            rhs = substituteDefinitions(entry[0], defMap)
+            largs = entry[-1]
             subs = {}
             for idx, v in enumerate(largs):
                 subs[v] = args[idx]
@@ -355,12 +373,32 @@ def substituteDefinitions(formula, defMap, mode=0):
             return Function(formulaType, args)
     if (mode == 0) and formula.is_symbol():
         formulaType = formula
-        if str(formulaType) in defMap:
-            entry = defMap[str(formulaType)]
-            assert(len(entry) == 4)
-            rhs = entry[-1]
+        if formulaType in defMap:
+            entry = defMap[formulaType]
+            assert(len(entry) == 3)
+            rhs = entry[0]
 #             print("rhsNew: %s" % rhs)
             return rhs
         return formula
     return formula
+
+def parseSizes(s):
+    sizes = {}
+    tokens = re.split('=|,', s)
+    i = 0
+    while i < len(tokens)-1:
+        k = tokens[i]
+        v = tokens[i+1]
+        i += 2
+        if len(k) == 0 or len(v) == 0:
+            break
+        if not v.isdigit():
+            break
+        if k in sizes:
+            break
+        sizes[k] = v
+#     print(sizes)
+    return sizes
+            
+    
     
