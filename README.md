@@ -101,12 +101,11 @@ Finite sorts (final): #3
 #### License
 Copyright (c) 2021  Aman Goel and Karem Sakallah, University of Michigan. All rights reserved.
 
-IC3PO is available for research and evaluation purposes only.
 IC3PO is provided as is, without any warranty.
-Any usage of IC3PO needs to comply with the usage terms as detailed in the file [COPYING](https://github.com/aman-goel/ic3po/blob/master/COPYING).
+Any usage of IC3PO needs to comply with the usage terms as detailed in the file [LICENSE](https://github.com/aman-goel/ic3po/blob/master/LICENSE).
 
 
 
 We would be glad to hear from you and help you in the case you are having a difficulty in using IC3PO
 
-Please report bugs and share your usage experience via email  [(amangoel@umich.edu)](amangoel@umich.edu) or on github [(https://github.com/aman-goel/ic3po)](https://github.com/aman-goel/ic3po)
+Please report bugs and share your usage experience on github [(https://github.com/aman-goel/ic3po)](https://github.com/aman-goel/ic3po)
