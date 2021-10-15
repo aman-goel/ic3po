@@ -16,6 +16,7 @@ import random
 import z3
 
 from vmt_parser import TransitionSystem
+from cti import CTI
 
 from pysmt.shortcuts import Symbol, Not, And, Or, EqualsOrIff, Implies, Function, Exists, ForAll,\
     get_free_variables, get_quantifier_variables
@@ -4257,6 +4258,13 @@ def backwardReach(fname, system=None):
         for cl, label in p.system.curr._infers.items():
             syntax_infers.append((label, cl))
         pretty_print_inv(syntax_infers, "Inferences")
+    
+    if common.gopts.cti == 1:
+        cti = CTI(p)
+        cti.init()
+        cti.execute() 
+        p.print_stats(print_stat)
+        return
     
     helpers = set()
     done = False
