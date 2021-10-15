@@ -53,6 +53,19 @@ class CTI(object):
         print(time_str(), "F /\ T /\ !P+", end =' ')
         return self.main.solve_with_model(self.solver, self.nexbad, [self.nexbad])
     
+    def func2inst(self, f, ft):
+        if ft.is_function_type():
+            args = []
+            i = 0
+            for paramt in ft.param_types:
+                i += 1
+                paramt_name = str(i) + ":" + str(paramt) 
+                args.append(Symbol(paramt_name, paramt))
+            fi = Function(f, args)
+            return fi
+        else:
+            return f
+
     def instantiate_function(self, f, ft, fi):
 #         print("processing: %s" % f)
         instantiated = True
