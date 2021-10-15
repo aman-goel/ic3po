@@ -10,10 +10,12 @@
 Reads a parameterized distributed protocol and performs property checking
 
 #### Research Papers
+- [[FMCAD'21](https://arxiv.org/abs/2108.08796)]  Proving Paxos with IC3PO
 - [[NFM'21](https://link.springer.com/chapter/10.1007/978-3-030-76384-8_9)]  IC3PO paper
 - [[arXiv'21](https://arxiv.org/abs/2103.14831)]   Extended version of IC3PO paper
 
 #### Research Talks
+- [[YouTube](https://youtu.be/nPwlj6w6EXU)] Proving Paxos with IC3PO presented at FMCAD'21
 - [[YouTube](https://youtu.be/e0pr3P2BrEU)] IC3PO presented at NFM'21
 - [[YouTube](https://www.youtube.com/watch?v=-da_iG9LQgk)] IC3PO presented at Simons Institute
 
