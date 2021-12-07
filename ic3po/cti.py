@@ -25,7 +25,6 @@ from vmt_parser import TransitionSystem
 from pysmt.environment import get_env
 from pysmt.shortcuts import Solver, QuantifierEliminator, Enum
 from pysmt.logics import BOOL
-from _pytest.compat import enum
 
 import common
 
