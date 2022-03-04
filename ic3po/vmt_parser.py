@@ -1277,7 +1277,7 @@ class TransitionSystem(SmtLibParser):
                 if a == "sort":
                     for v in lst:
                         sz = v
-                        if (common.gopts.init >= 0) and (sz != "0"):
+                        if (common.gopts.init >= 0):
                             sz = str(common.gopts.init)
                         self.add_sort(f.symbol_type(), sz)
                 if a == "init":
@@ -1307,7 +1307,15 @@ class TransitionSystem(SmtLibParser):
                 if a == "definition":
                     for v in lst:
                         self.orig.add_definition(f, v)
-        
+        decls = script.filter_by_command_name("declare-sort")
+        for d in decls:
+            s = d.args[0]
+            if s not in self._sorts:
+                sz = 0
+                if (common.gopts.init >= 0):
+                    sz = str(common.gopts.init)
+                self.add_sort(s, sz)
+
         if len(self.orig._helpers) != 0:
             eprint("\t(found #%d user-provided helpers)" % len(self.orig._helpers))
             print("\t(found #%d user-provided helpers)" % len(self.orig._helpers))
