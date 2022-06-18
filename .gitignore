@@ -19,6 +19,10 @@ ivybench/final/*/logs/*
 */*.csv
 xtras/fail*.log
 foo/*
+.DS_Store
+.idea/
+xtras/
+requirements.txt
 
 # But not these files
 !.gitignore
