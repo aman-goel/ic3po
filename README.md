@@ -1,4 +1,4 @@
-<img align="right" width="100" height="auto" src=“misc/logo.png">
+<img align="right" width="100" height="auto" src="misc/logo.png">
 </img>
 
 # IC3PO
@@ -32,7 +32,7 @@ Clone the repository and:
 				(check the output in foo/bar)
 
 #### IC3PO Tool Flow
-<img align="center" width="700" height="auto" src=“misc/toolflow.png">
+<img align="center" width="700" height="auto" src="misc/toolflow.png">
 </img>
 
 #### Output
