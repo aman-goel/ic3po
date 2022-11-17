@@ -127,7 +127,7 @@ class System():
                 and paramt[0] == paramt[1]
                 ):
                 name_pre = str(pre)
-                if name_pre == "le" or name_pre.endswith(".le"):
+                if name_pre == "le" or name_pre.endswith(".le") or name_pre.startswith("le_"):
                     self.add_le_state(pre)
         else:
             pre = formula
@@ -546,14 +546,14 @@ class TransitionSystem(SmtLibParser):
             gstr = pretty_print_str(g)
             if gt not in self._ordered_sorts:
                 continue
-            if gstr == "zero" or gstr == "negone":
+            if gstr.startswith("zero") or gstr.startswith("negone"):
                 gt = g.symbol_type()
                 assert(gt in self._enumsorts)
                 domain = self._enumsorts[gt]
                 eq = EqualsOrIff(g, domain[0])
                 res.append(eq)
                 self.zero = (domain[0], g)
-            elif gstr == "firste":
+            elif gstr.startswith("firste"):
                 gt = g.symbol_type()
                 assert(gt in self._enumsorts)
                 domain = self._enumsorts[gt]
@@ -610,7 +610,7 @@ class TransitionSystem(SmtLibParser):
                 continue
             gstr = pretty_print_str(g)
             print(gstr)
-            if gstr == "zero" or gstr == "negone":
+            if gstr.startswith("zero") or gstr.startswith("negone"):
                 gt = g.symbol_type()
                 if gt in self._enumsorts:
                     self._ordered_min[gt] = g
@@ -618,7 +618,7 @@ class TransitionSystem(SmtLibParser):
                     domain = self._enumsorts[gt]
                     eq = EqualsOrIff(g, domain[0])
                     res.append(eq)
-            elif gstr == "max":
+            elif gstr.startswith("max"):
                 gt = g.symbol_type()
                 if gt in self._enumsorts:
                     self._ordered_max[gt] = g
@@ -626,7 +626,7 @@ class TransitionSystem(SmtLibParser):
                     domain = self._enumsorts[gt]
                     eq = EqualsOrIff(g, domain[-1])
                     res.append(eq)
-            elif gstr == "firste":
+            elif gstr.startswith("firste"):
                 gt = g.symbol_type()
                 if gt in self._enumsorts:
                     self._ordered_first[gt] = g

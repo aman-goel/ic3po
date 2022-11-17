@@ -1268,11 +1268,6 @@ class PDR(object):
     def boost_ordered(self, cubeSet, enum2qvar, antecedent, qvars, fIdx):
         cubeNew = And(cubeSet)
         consts = cubeNew.get_enum_constants()
-        antConditions = []
-        for v in antecedent.values():
-            for c in v:
-                antConditions.append(c)
-        antCond = And(antConditions)
         qvarsOld = qvars.copy()
 
 #         print("(boosting ordered sorts)")
@@ -1306,7 +1301,13 @@ class PDR(object):
             print("(cube: new)")
             for c in cubeSetNew:
                 print("\t%s" % pretty_serialize(c))
-                
+
+            antConditions = []
+            for v in antecedent.values():
+                for c in v:
+                    antConditions.append(c)
+            antCond = And(antConditions)
+
             conditionsEq = []
             for i in range(0,len(idx2var)-1):
                 qvi = idx2var[i]
@@ -1384,6 +1385,7 @@ class PDR(object):
                         conditionsFull.append(cond2)
                     else:
                         assert(0)
+
 #             for i in range(0,len(idx2var)-1):
 #                 qvi = allVars[i]
 #                 qvj = allVars[i+1]
@@ -1457,7 +1459,7 @@ class PDR(object):
                 result, required = self.find_required_conditions(solver, And(antCond, cubeNew), conditions)
                 if (not result):
                     print("(conditions: full are sufficient)")
-                
+
             if result:
                 print("(conditions: full are insufficient)")
                 assert(0)
