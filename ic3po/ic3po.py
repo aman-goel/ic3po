@@ -1809,10 +1809,12 @@ class PDR(object):
                 if (not rhs.is_symbol()) or (lhs in qvars):
                     lhs, rhs = rhs, lhs
                 if rhs.is_symbol and rhs in qvars:
-                    if rhs not in eqMap:
-                        eqMap[rhs] = lhs
-                        qvarsNew.discard(rhs)
-                        continue
+                    lhsVars = lhs.get_free_variables()
+                    if rhs not in lhsVars:
+                        if rhs not in eqMap:
+                            eqMap[rhs] = lhs
+                            qvarsNew.discard(rhs)
+                            continue
             tmpSet.add(c)
             
         if len(eqMap) != 0:
