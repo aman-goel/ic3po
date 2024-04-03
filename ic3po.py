@@ -71,15 +71,15 @@ IC3PO
 ---
   IC3 for Proving Protocol Properties
   
-  Reads a parameterized state transition system in Ivy and performs 
-  symmetry-aware property checking
+  Reads a parameterized state transition system in Ivy (or customized VMT) 
+   and performs regularity-aware property checking
 -------------------
 """
 
-short_header="""------------------------------------------------------------------------
+short_header="""----------------------------------------------------------------------------------
 IC3PO: IC3 for Proving Protocol Properties
-copyright (c) 2018 - Present  Aman Goel and Karem Sakallah, University of Michigan
-------------------------------------------------------------------------
+Copyright (c) 2018 - Present  Aman Goel and Karem Sakallah, University of Michigan
+----------------------------------------------------------------------------------
 """
 
 def split_path(name):
