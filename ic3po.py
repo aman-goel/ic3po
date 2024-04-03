@@ -78,7 +78,7 @@ IC3PO
 
 short_header="""------------------------------------------------------------------------
 IC3PO: IC3 for Proving Protocol Properties
-copyright (c) 2021  Aman Goel and Karem Sakallah, University of Michigan
+copyright (c) 2018 - Present  Aman Goel and Karem Sakallah, University of Michigan
 ------------------------------------------------------------------------
 """
 

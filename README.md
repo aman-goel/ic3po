@@ -5,7 +5,7 @@
 
 **IC3** for **P**r**o**ving **P**r**o**tocol **P**r**o**perties
 
-> Copyright (c) 2021  Aman Goel [(amangoel@umich.edu)](amangoel@umich.edu)  and  Karem Sakallah [(karem@umich.edu)](karem@umich.edu) , University of Michigan
+> Copyright (c) 2018 - Present  Aman Goel [(amangoel@umich.edu)](amangoel@umich.edu)  and  Karem Sakallah [(karem@umich.edu)](karem@umich.edu) , University of Michigan
 
 Reads a parameterized distributed protocol and performs property checking
 
@@ -101,7 +101,7 @@ Finite sorts (final): #3
 ```<max IC3 frame> : <# of added clauses in each frame> s: <total # of clauses learnt>```
 
 #### License
-Copyright (c) 2021  Aman Goel and Karem Sakallah, University of Michigan. All rights reserved.
+Copyright (c) 2018 - Present  Aman Goel and Karem Sakallah, University of Michigan. All rights reserved.
 
 IC3PO is provided as is, without any warranty.
 Any usage of IC3PO needs to comply with the usage terms as detailed in the file [LICENSE](https://github.com/aman-goel/ic3po/blob/master/LICENSE).

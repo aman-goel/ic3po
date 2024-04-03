@@ -1,7 +1,7 @@
 # ------------------------------------------
 # IC3PO: IC3 for Proving Protocol Properties
 # ------------------------------------------
-# Copyright (c) 2021  Aman Goel and Karem Sakallah, University of Michigan. 
+# Copyright (c) 2018 - Present  Aman Goel and Karem Sakallah, University of Michigan. 
 # All rights reserved.
 #
 # Author: Aman Goel (amangoel@umich.edu), University of Michigan
@@ -46,7 +46,7 @@ IC3PO
 """
 
 short_header="""IC3PO 
-copyright (c) 2021  Aman Goel and Karem Sakallah, University of Michigan"""
+copyright (c) 2018 - Present  Aman Goel and Karem Sakallah, University of Michigan"""
 
 def getopts(header):
     p = argparse.ArgumentParser(description=str(header), formatter_class=argparse.RawDescriptionHelpFormatter)

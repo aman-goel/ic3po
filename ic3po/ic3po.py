@@ -1,7 +1,7 @@
 # ------------------------------------------
 # IC3PO: IC3 for Proving Protocol Properties
 # ------------------------------------------
-# Copyright (c) 2021  Aman Goel and Karem Sakallah, University of Michigan. 
+# Copyright (c) 2018 - Present  Aman Goel and Karem Sakallah, University of Michigan. 
 # All rights reserved.
 #
 # Author: Aman Goel (amangoel@umich.edu), University of Michigan
@@ -1800,8 +1800,13 @@ class PDR(object):
             v = v.args()[0]
         cubeSet = flatten_and(v)
         
+        print("(cube eq: pre)")
+        for c in cubeSet:
+            print("\t%s" % pretty_serialize(c))
+
         eqMap = dict()
         tmpSet = set()
+        eqSymbols = set()
         for c in cubeSet:
             if c.node_type() == op.EQUALS:
                 lhs = c.arg(0)
@@ -1810,14 +1815,24 @@ class PDR(object):
                     lhs, rhs = rhs, lhs
                 if rhs.is_symbol and rhs in qvars:
                     lhsVars = lhs.get_free_variables()
-                    if rhs not in lhsVars:
+                    for s in lhs.get_free_variables():
+                        eqSymbols.add(s)
+                    if rhs not in eqSymbols:
                         if rhs not in eqMap:
                             eqMap[rhs] = lhs
                             qvarsNew.discard(rhs)
+#                            print("\trhs is %s" % pretty_serialize(rhs))
+#                            print("\tlhs is %s" % pretty_serialize(lhs))
+#                            for lv in lhsVars:
+#                                print("\tlhsVar is %s" % pretty_serialize(lv))
                             continue
             tmpSet.add(c)
             
         if len(eqMap) != 0:
+            print("(eq map: pre)")
+            for l, r in eqMap.items():
+                print("\t%s -> %s" % (pretty_serialize(l), pretty_serialize(r)))
+
             changed = True
             while changed:
                 changed = False
@@ -3761,16 +3776,16 @@ class PDR(object):
                     wMus = And(core)
                     
                     consts = wMus.get_enum_constants()
-                    for sQ, rhs in self.system._quorums_sorts.items():
-                        sA = rhs[1]
-                        allConstsQ = self.system._enumsorts[sQ]
-                        allConstsA = self.system._enumsorts[sA]
-                        presentConstsQ = consts.intersection(allConstsQ)
-                        presentConstsA = consts.intersection(allConstsA)
-                        if len(presentConstsQ) != 0 and len(presentConstsA) != 0:
-                            core = list(required)
-                            assumptions = core
-                            print("(restoring state mus)")
+#                     for sQ, rhs in self.system._quorums_sorts.items():
+#                         sA = rhs[1]
+#                         allConstsQ = self.system._enumsorts[sQ]
+#                         allConstsA = self.system._enumsorts[sA]
+#                         presentConstsQ = consts.intersection(allConstsQ)
+#                         presentConstsA = consts.intersection(allConstsA)
+#                         if len(presentConstsQ) != 0 and len(presentConstsA) != 0:
+#                             core = list(required)
+#                             assumptions = core
+#                             print("(restoring state mus)")
             
 #                     sConsts = sMus.get_enum_constants()
 #                     wConsts = wMus.get_enum_constants()
@@ -4614,8 +4629,8 @@ def backwardReach(fname, system=None):
         p.system._fin2sort.clear()
         
         if nFailed_ind != 0:
-            eprint(time_str(), "(incremental SymIC3)")
-            print(time_str(), "(incremental SymIC3)")
+            eprint(time_str(), "(incremental RegIC3)")
+            print(time_str(), "(incremental RegIC3)")
         else:
             if common.gopts.verbosity > 0:
                 eprint(time_str(), "(unbounded checks failed due to base size being too small)")
@@ -4624,8 +4639,8 @@ def backwardReach(fname, system=None):
                 if common.gopts.verbosity > 0:
                     eprint(time_str(), "(cleaning up clauses too specific to current size)")
                     print(time_str(), "(cleaning up clauses too specific to current size)")
-                    eprint(time_str(), "(incremental SymIC3)")
-                    print(time_str(), "(incremental SymIC3)")
+                    eprint(time_str(), "(incremental RegIC3)")
+                    print(time_str(), "(incremental RegIC3)")
             else:
                 if inductCheck:
                     if False:
@@ -4637,8 +4652,8 @@ def backwardReach(fname, system=None):
                         break
                     else:
                         if common.gopts.verbosity > 0:
-                            eprint(time_str(), "(rerunning SymIC3 with increased base size)")
-                            print(time_str(), "(rerunning SymIC3 with increased base size)")
+                            eprint(time_str(), "(rerunning RegIC3 with increased base size)")
+                            print(time_str(), "(rerunning RegIC3 with increased base size)")
                         
                     if forceReset:
                         allowReuse = False
