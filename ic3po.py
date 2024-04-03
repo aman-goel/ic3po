@@ -10,7 +10,7 @@ from distutils import spawn
 import re
 from distutils.spawn import find_executable
 
-version=1.1.0
+version="1.1.1"
 IVY2VMT="ic3po/ivy_to_vmt.py"
 IC3PO="ic3po/top.py"
 
