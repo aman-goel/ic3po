@@ -241,9 +241,9 @@ def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
 #     for v in cvars:
     for v in sorted(cvars, key=str):
         enumsort = v.constant_type()
-        if self.ordered == "partial" and enumsort in self.system._ordered_sorts:
+        if self.boost_ordered_en and self.ordered == "partial" and enumsort in self.system._ordered_sorts:
             continue
-        if self.quorums == "symmetric" and (enumsort in self.system._quorums_parent or enumsort in self.system._quorums_child):
+        if self.boost_quorums_en and self.quorums == "symmetric" and (enumsort in self.system._quorums_parent or enumsort in self.system._quorums_child):
             continue
         
         if self.ordered == "zero" and str(enumsort).startswith("epoch"):

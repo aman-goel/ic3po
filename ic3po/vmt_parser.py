@@ -210,7 +210,7 @@ class System():
                 self.add_var(v)
                 self.add_other(v)
             action = action.arg(0)
-        self._actions.append([action, name, None])
+        self._actions.append([action, name, None, formula])
 
 #     def get_axiom_vars(self):
 #         axiom_vars = set()
@@ -268,11 +268,15 @@ class System():
             if qvars != None:
                 action = Exists(qvars, action)
             self._actions[idx][0] = action
-            
+            if self._actions[idx][3].is_exists():
+                self._actions[idx][3] = Exists(self._actions[idx][3].quantifier_vars(), action)
+            else:
+                self._actions[idx][3] = action
+
 #             self._trel = Or(action, self._trel)
 
             action_symbol = Int(idx)
-            self._actions[idx][-1] = action_symbol
+            self._actions[idx][2] = action_symbol
             cond = EqualsOrIff(self._input_action, action_symbol)
             self._trel = Ite(cond, action, self._trel)
             
@@ -349,7 +353,11 @@ class System():
                 
             self._actions[idx][0] = action
             self._actions[idx][2] = en
-            
+            if self._actions[idx][3].is_exists():
+                self._actions[idx][3] = Exists(self._actions[idx][3].quantifier_vars(), action)
+            else:
+                self._actions[idx][3] = action
+
             cond = Implies(en, action)
             tcond.append(cond)
             enOr.append(en)
@@ -753,7 +761,7 @@ class TransitionSystem(SmtLibParser):
         
         self.curr._actions = list()
         for v in self.orig._actions:
-            self.curr._actions.append([v[0].fsubstitute(), v[1], v[2].fsubstitute()])
+            self.curr._actions.append([v[0].fsubstitute(), v[1], v[2].fsubstitute(), v[3].fsubstitute()])
         
         self.curr._action_en2idx = dict()
         for l, r in self.orig._action_en2idx.items():
@@ -844,7 +852,7 @@ class TransitionSystem(SmtLibParser):
         
         self.curr._actions = list()
         for v in self.tmp._actions:
-            self.curr._actions.append([v[0].fsubstitute(), v[1], v[2].fsubstitute()])
+            self.curr._actions.append([v[0].fsubstitute(), v[1], v[2].fsubstitute(), v[3].fsubstitute()])
         
         self.curr._action_en2idx = dict()
         for l, r in self.tmp._action_en2idx.items():
@@ -1272,6 +1280,7 @@ class TransitionSystem(SmtLibParser):
         script = self._parser.get_script(script_ss)
         ann = script.annotations.get_annotations()
 
+        sizes = parseSizes(common.gopts.size)
         for f, amap in ann.items():
             for a, lst in amap.items():
                 if a == "sort":
@@ -1279,7 +1288,11 @@ class TransitionSystem(SmtLibParser):
                         sz = v
                         if (common.gopts.init >= 0):
                             sz = str(common.gopts.init)
-                        self.add_sort(f.symbol_type(), sz)
+                        ft = f.symbol_type()
+                        ft_str = str(ft)
+                        if ft_str in sizes:
+                            sz = sizes[ft_str]
+                        self.add_sort(ft, sz)
                 if a == "init":
                     self.orig.add_init(f)
                 if a == "axiom":
@@ -1390,13 +1403,6 @@ class TransitionSystem(SmtLibParser):
                                 eprint("\t(setting |%s| to %d)" % (str(tt), sz))
                         except ValueError:
                             pass
-        else:
-            sizes = parseSizes(common.gopts.size)
-            for tt in sorted(self._sorts, key=str):
-                ri = "0"
-                k = str(tt)
-                if k in sizes:
-                    ri = sizes[k]
 
                 if ri:
                     try:

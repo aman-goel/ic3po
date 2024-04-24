@@ -40,15 +40,60 @@ def fprint(s):
 class FR(object):
     def __init__(self, system):
         self.system = system
-        self.reset()
+        self.stat = dict()
+        self.time_stat = dict()
+        self.query_stat = dict()
         self.debug = False
+        self.qf = common.gopts.qf
+        self.cache_qf = dict()
+        self.cache_qu = dict()
+        self.eval_wires = False
+        self.use_wires = (common.gopts.wires != 0)
+        self.boost_ordered_en = False
+        self.boost_quorums_en = False
+        self.exp = False
+        self.ordered = "none"
+        self.quorums = "symmetric"
+        self.boosting = "any"
+        self.init_stats()
+        self.reset()
     
     def init_solver(self):
         solver = Solver(name="bdd", logic=BOOL)
         return solver
 
     def reset(self):
-        self.qesolver = QuantifierEliminator(name='z3')
+        self.frames = []
+        self.globals = {}
+        self.prospectives = {}
+        self.framesolver = []
+        z3ctx = z3.main_ctx()
+        del z3ctx
+        if yices_api.yices_is_inited():
+            yices_api.yices_reset()
+        self._faxioms = []
+        self._init_formula = TRUE()
+        self._init_formula_orig = TRUE()
+        self._trel_formula = TRUE()
+        self._prop_formula = TRUE()
+        self._prop_formula_orig = TRUE()
+        self._axiom_formula = TRUE()
+        self._print = False
+        get_env().fsubstituter.freset()
+        self._subsume = dict()
+        self.cache_qf = dict()
+        self.cache_qu = dict()
+        self.init_values = dict()
+        self.globalEnum = set()
+#         z3.set_param('smt.ematching', False)
+#         print("z3.smt.ematching = %s" % z3.get_param('smt.ematching'))
+#         print("z3.smt.mbqi = %s" % z3.get_param('smt.mbqi'))
+#         print("z3.smt.core.minimize = %s" % z3.get_param('smt.core.minimize'))
+#         print('PYTHON HASH SEED IS', os.environ['PYTHONHASHSEED'])
+        self.qf = common.gopts.qf
+        self.eval_engine = EvalEngine(self.system, self)
+        self.qesolver = QuantifierEliminator(name='scalarshannon')
+        # self.qesolver = QuantifierEliminator(name='z3')
         self._faxioms = []
         self._axiom_formula = TRUE()
         get_env().fsubstituter.freset()
@@ -70,6 +115,50 @@ class FR(object):
 #         print("quantifier-free: \n%s", qf.serialize())
         return qf
     
+    def get_formula_qf(self, formula):
+        if self.qf >= 2:
+            if (len(self.system._fin2sort) == 0 
+#                 and len(self.system._sort2fin) == len(self.system._sorts)
+                ):
+                if formula in self.cache_qf:
+                    return self.cache_qf[formula]
+
+                qvars = formula.get_quantifier_variables()
+                if len(qvars) == 0:
+                    return formula
+                
+                noScalarVar = True
+                for v in qvars:
+                    if v.symbol_type().is_enum_type():
+                        noScalarVar = False
+                        break
+                if noScalarVar:
+                    return formula
+                
+#                 print("QE: %s" % formula.serialize())
+                
+                push_time()
+                q_formula = And(formula)
+                qf_formula = self.get_qf_form(q_formula)
+                self.update_time_stat("time-qf", pop_time())
+                
+#                 for f in flatten(qf_formula):
+#                     print("--- %s" % f.serialize())
+#                 assert(0)
+
+#                 print("Adding QF entry: ", end='')
+#                 pretty_print(formula)
+#                 pretty_print(qf_formula)
+        
+                self.cache_qf[formula] = qf_formula
+                self.cache_qu[qf_formula] = formula
+                return qf_formula
+#         else:
+#             formula_flat = self.system.replaceDefinitions(formula)
+#             self.cache_qu[formula_flat] = formula
+#             return formula_flat
+        return formula
+    
     def get_formulae(self, formula, qf=True):
         formulae = formula
         if not isinstance(formulae, list):
@@ -81,7 +170,335 @@ class FR(object):
             qf_formulae = flatten_cube(qf)
             return qf_formulae
         return formulae
-    
+
+    def propagate_eq(self, cubeSet, antecedent, ivars, qvars, fullsorts):
+        eqMap = dict()
+        tmpSet = set()
+        #         incompleteSorts = set()
+        for c in cubeSet:
+            if c.node_type() == op.EQUALS:
+                lhs = c.arg(0)
+                rhs = c.arg(1)
+                if (not rhs.is_symbol()) or (lhs in qvars):
+                    lhs, rhs = rhs, lhs
+                #                 print("lhs ", lhs)
+                #                 print("rhs ", rhs)
+                if rhs.is_symbol and rhs in qvars:
+                    if (common.gopts.const > 1) or (not lhs.is_function_application()):
+                        rhst = rhs.symbol_type()
+                        if rhst.is_enum_type() and rhs not in eqMap:
+                            eqMap[rhs] = lhs
+                            qvars.discard(rhs)
+                            #                             print("add1 %s -> %s" % (rhs, lhs))
+                            #                             incompleteSorts.add(rhst)
+                            continue
+                        elif rhs in ivars and rhs not in eqMap:
+                            eqMap[rhs] = lhs
+                            qvars.discard(rhs)
+                            #                             print("add2 %s -> %s" % (rhs, lhs))
+                            continue
+
+            tmpSet.add(c)
+
+        if len(eqMap) != 0:
+            changed = True
+            while changed:
+                changed = False
+                for l, r in eqMap.items():
+                    rNew = r.simple_substitute(eqMap)
+                    if (rNew != r):
+                        changed = True
+                    eqMap[l] = rNew
+
+            print("(eq map)")
+            for l, r in eqMap.items():
+                print("\t%s -> %s" % (pretty_serialize(l), pretty_serialize(r)))
+
+            cubeSetNew = set()
+            for c in tmpSet:
+                c_new = c.simple_substitute(eqMap)
+                cubeSetNew.add(c_new)
+
+            antecedentNew = dict()
+            for enumsort, qvar in antecedent.items():
+                vNew = []
+                for i in qvar:
+                    i_new = i.simple_substitute(eqMap)
+                    #                     if (i_new != i):
+                    #                         cubeSetNew.add(i_new)
+                    #                     else:
+                    #                         vNew.append(i_new)
+                    vNew.append(i_new)
+                antecedentNew[enumsort] = vNew
+
+            fullsortsNew = []
+            for fs in fullsorts:
+                #                 if fs[0] not in incompleteSorts:
+                #                     fullsortsNew.append(fs)
+                rhs = []
+                for v in fs[1]:
+                    if v in eqMap:
+                        v = eqMap[v]
+                    rhs.append(v)
+                fullsortsNew.append([fs[0], rhs])
+
+            print("(cube eq)")
+            for c in cubeSetNew:
+                print("\t%s" % pretty_serialize(c))
+
+            print("(qvars eq)")
+            for c in qvars:
+                print("\t%s" % pretty_serialize(c))
+
+            print("(antecedent eq)")
+            for enumsort, qvar in antecedentNew.items():
+                print("\t%s" % enumsort)
+                for c in qvar:
+                    print("\t-> %s" % pretty_serialize(c))
+
+            self.print_fullsorts(fullsortsNew)
+
+            removedVars = set(eqMap.keys())
+            for c in cubeSetNew:
+                fv = c.get_free_variables()
+                fv_removed = fv.intersection(removedVars)
+                if len(fv_removed) != 0:
+                    print("Error: found bound variables as free in %s" % pretty_serialize(c))
+                    for c in fv_removed:
+                        print("\t%s" % pretty_serialize(c))
+                    assert(0)
+
+            return eqMap, cubeSetNew, antecedentNew, fullsortsNew
+        else:
+            return eqMap, cubeSet, antecedent, fullsorts
+
+    def propagate_eq_post(self, cube):
+        cubeEq = cube
+
+        qvars = set()
+        qvarsNew = set()
+        v = cube
+        if v.is_exists():
+            vq = v.quantifier_vars()
+            for i in vq:
+                qvars.add(i)
+                qvarsNew.add(i)
+            v = v.args()[0]
+        cubeSet = flatten_and(v)
+
+        eqMap = dict()
+        tmpSet = set()
+        for c in cubeSet:
+            if c.node_type() == op.EQUALS:
+                lhs = c.arg(0)
+                rhs = c.arg(1)
+                if (not rhs.is_symbol()) or (lhs in qvars):
+                    lhs, rhs = rhs, lhs
+                if rhs.is_symbol and rhs in qvars:
+                    if rhs not in eqMap:
+                        eqMap[rhs] = lhs
+                        qvarsNew.discard(rhs)
+                        continue
+            tmpSet.add(c)
+
+        if len(eqMap) != 0:
+            changed = True
+            while changed:
+                changed = False
+                for l, r in eqMap.items():
+                    rNew = r.simple_substitute(eqMap)
+                    if (rNew != r):
+                        changed = True
+                    eqMap[l] = rNew
+
+            print("(eq map: post)")
+            for l, r in eqMap.items():
+                print("\t%s -> %s" % (pretty_serialize(l), pretty_serialize(r)))
+
+            cubeSetNew = set()
+            for c in tmpSet:
+                c_new = c.simple_substitute(eqMap)
+                cubeSetNew.add(c_new)
+
+            print("(cube eq: post)")
+            for c in cubeSetNew:
+                print("\t%s" % pretty_serialize(c))
+
+            print("(qvars eq: post)")
+            for c in qvarsNew:
+                print("\t%s" % pretty_serialize(c))
+
+            removedVars = set(eqMap.keys())
+            for c in cubeSetNew:
+                fv = c.get_free_variables()
+                fv_removed = fv.intersection(removedVars)
+                if len(fv_removed) != 0:
+                    print("Error: found bound variables as free in %s" % pretty_serialize(c))
+                    for c in fv_removed:
+                        print("\t%s" % pretty_serialize(c))
+                    assert(0)
+
+            cubeEq = And(cubeSetNew)
+            if len(qvarsNew) != 0:
+                cubeEq = Exists(qvarsNew, cubeEq)
+        return cubeEq
+
+    def print_fullsorts(self, fullsorts):
+        if len(fullsorts) != 0:
+            print("(fullsorts)")
+            for enumsort, qvar in fullsorts:
+                print("\t%s -> %s" % (str(enumsort), pretty_print_set(qvar)))
+
+    def init_stats(self):
+        self.set_stat("scalls", 0)
+        self.set_stat("scalls-finite", 0)
+        self.set_stat("scalls-infinite", 0)
+        self.set_stat("scalls-finite-full", 0)
+        self.set_stat("cti", 0)
+        self.set_stat("cubes", 0)
+        self.set_stat("subsumed-calls", 0)
+        self.set_stat("subsumed-subset", 0)
+        self.set_stat("subsumed-varintersect-c", 0)
+        self.set_stat("subsumed-varintersect-e", 0)
+        self.set_stat("subsumed-query-sat", 0)
+        self.set_stat("subsumed-query-unsat", 0)
+        self.set_stat("subsumed-eq", 0)
+        self.set_stat("unsat-core", 0)
+        self.set_stat("sz-unsat-core-sum", 0)
+        self.set_stat("sz-unsat-min-sum", 0)
+        self.set_stat("sz-cube-sum", 0)
+        self.set_stat("antecedent-reduction-sum", 0)
+        self.set_stat("antecedent-total-sum", 0)
+        self.set_stat("antecedent-calls", 0)
+        self.set_stat("antecedent-calls-reduced", 0)
+        self.set_stat("antecedent-scalls", 0)
+        self.init_time_stats()
+
+    def init_time_stats(self):
+        self.set_time_stat("time-cti-bad-sat", 0)
+        self.set_time_stat("time-cti-bad-unsat", 0)
+        self.set_time_stat("time-cti-sat", 0)
+        self.set_time_stat("time-cti-unsat", 0)
+        self.set_time_stat("time-forward", 0)
+        self.set_time_stat("time-antecedent", 0)
+        self.set_time_stat("time-subsume", 0)
+        self.set_time_stat("time-subsume-query", 0)
+        self.set_time_stat("time-inv-check-finite", 0)
+        self.set_time_stat("time-inv-check-infinite", 0)
+        self.set_time_stat("time-inv-reuse", 0)
+        self.set_time_stat("time-minimize", 0)
+        self.set_time_stat("time-qf", 0)
+        self.init_query_stats()
+
+    def init_query_stats(self):
+        self.set_query_stat("time-q-max-finite", 0)
+        self.set_query_stat("time-q-max-finite-core", 0)
+        self.set_query_stat("time-q-max-infinite", 0)
+        self.set_query_stat("time-q-max-infinite-core", 0)
+
+    def print_stats(self, func=print_stat_stdout):
+        print_stat_stdout("random", self.random)
+        self.print_stat(func, "scalls")
+        self.print_stat(func, "scalls-finite")
+        self.print_stat(func, "scalls-infinite")
+        self.print_stat(func, "scalls-finite-full")
+        self.print_stat(func, "cti")
+        self.print_stat(func, "cubes")
+        self.print_stat(func, "subsumed-calls")
+        self.print_stat(func, "subsumed-subset")
+        self.print_stat(func, "subsumed-varintersect-c")
+        self.print_stat(func, "subsumed-varintersect-e")
+        self.print_stat(func, "subsumed-query-sat")
+        self.print_stat(func, "subsumed-query-unsat")
+        self.print_stat(func, "subsumed-eq")
+        self.print_stat(func, "unsat-core")
+        self.print_avg_stat(func, "sz-unsat-core-sum", self.stat["unsat-core"])
+        self.print_avg_stat(func, "sz-unsat-min-sum", self.stat["unsat-core"])
+        self.print_avg_stat(func, "sz-cube-sum", self.stat["cubes"])
+        self.print_stat(func, "antecedent-reduction-sum")
+        self.print_stat(func, "antecedent-total-sum")
+        self.print_avg_stat(func, "antecedent-reduction-sum", self.stat["antecedent-total-sum"])
+        self.print_stat(func, "antecedent-calls")
+        self.print_stat(func, "antecedent-calls-reduced")
+        self.print_stat(func, "antecedent-scalls")
+        self.print_time_stats(func)
+        print(time_str(), "-------------------------------------------------")
+
+    def print_query_stats(self, func=print_stat_stdout):
+        self.print_query_stat(func, "time-q-max-finite")
+        self.print_query_stat(func, "time-q-max-finite-core")
+        self.print_query_stat(func, "time-q-max-infinite")
+        self.print_query_stat(func, "time-q-max-infinite-core")
+
+    def print_time_stats(self, func=print_stat_stdout):
+        self.print_query_stats(func)
+        self.print_time_stat(func, "time-cti-bad-sat")
+        self.print_time_stat(func, "time-cti-bad-unsat")
+        self.print_time_stat(func, "time-cti-sat")
+        self.print_time_stat(func, "time-cti-unsat")
+        self.print_time_stat(func, "time-forward")
+        self.print_time_stat(func, "time-antecedent")
+        self.print_time_stat(func, "time-subsume")
+        self.print_time_stat(func, "time-subsume-query")
+        self.print_time_stat(func, "time-inv-check-finite")
+        self.print_time_stat(func, "time-inv-check-infinite")
+        self.print_time_stat(func, "time-inv-reuse")
+        self.print_time_stat(func, "time-minimize")
+        self.print_time_stat(func, "time-qf")
+        self.print_total_time(func)
+        print(time_str(), "-------------------------------------------------")
+
+    def print_stat(self, func, name):
+        assert name in self.stat
+        func(name, self.stat[name])
+
+    def print_time_stat(self, func, name, prefix=""):
+        assert name in self.time_stat
+        func("%s%s" % (prefix, name), "%.0f" % self.time_stat[name])
+
+    def print_query_stat(self, func, name):
+        assert name in self.query_stat
+        func(name+"-ms", "%.0f" % self.query_stat[name])
+
+    def print_total_time(self, func):
+        total = 0
+        for k, v in self.time_stat.items():
+            if k != "time-subsume-query" and k != "time-qf":
+                total += v
+        func("time-sum", "%.0f" % total)
+
+    def print_avg_stat(self, func, name, denom):
+        assert name in self.stat
+        name_avg = name.replace("-sum", "-avg")
+        if denom == 0:
+            func(name_avg, -1)
+        else:
+            value = (1.0 * self.stat[name]) / denom
+            func(name_avg, "%.2f" % value)
+
+    def set_stat(self, name, value):
+        self.stat[name] = value
+
+    def set_time_stat(self, name, value):
+        self.time_stat[name] = value
+
+    def set_query_stat(self, name, value):
+        self.query_stat[name] = value
+
+    def update_stat(self, name, value=1):
+        assert name in self.stat
+        self.stat[name] += value
+
+    def update_time_stat(self, name, value=1):
+        assert name in self.time_stat
+        self.time_stat[name] += value
+
+    def update_query_stat(self, name, value=1):
+        assert name in self.query_stat
+        if self.query_stat[name] < value:
+            self.query_stat[name] = value
+            return True
+        return False
     def check_query(self, solver, formulae=None, timeout=None):
         print("Formulae #%d:" % len(formulae))
         for f in formulae:
@@ -126,7 +543,7 @@ class FR(object):
     def build_actions(self):
         self.actions = {}
         for f in self.system.curr._actions:
-            action = f[0]
+            action = f[3]
             name = f[1]
             if self.system.curr.is_noop(name):
                 continue
@@ -134,29 +551,32 @@ class FR(object):
             print(time_str(), "(building bdds for %s)" % name)
             if name not in self.actions:
                 self.actions[name] = []
+            queue = []
             if action.is_exists():
                 instances = self.converter._get_children(action)
-                queue = []
-                for i in instances:
+                # print("Got %d instances for %s" % (len(instances), name))
+                for idx, i in enumerate(instances):
+                    # print("Instance %d: %s" % (idx, i))
                     bddi = self.converter.convert(i)
+                    # self.dump_dot(bddi, name+str(idx)+".dot")
                     queue.append(bddi)
-
-                all_vars = set(self.converter.var2node.keys())
-                pnabstract = all_vars.difference(self.pvars)
-                pnabstract = pnabstract.difference(self.nvars)
-                projAll = self.converter.cube_from_var_list(pnabstract)
-                for bddq in queue:
-#                     bddq = self.ddmanager.ExistAbstract(bddq, projAll)
-                    self.actions[name].append(bddq)
-                print("\t\tfound #%d bdd instances for %s)" % (len(queue), name))
-#                 if name == "ext:grant":
-#                     for bdd in self.actions[name]:
-#                         self.dump_dot(bdd)
-#                         assert(0)
             else:
-                q = self.converter.convert(action)
-                self.actions[name] = [q]
-        
+                bddi = self.converter.convert(action)
+                # self.dump_dot(bddi, name+".dot")
+                queue.append(bddi)
+
+            all_vars = set(self.converter.var2node.keys())
+            pnabstract = all_vars.difference(self.pvars)
+            pnabstract = pnabstract.difference(self.nvars)
+            projAll = self.converter.cube_from_var_list(pnabstract)
+            for bddq in queue:
+#                     bddq = self.ddmanager.ExistAbstract(bddq, projAll)
+                self.actions[name].append(bddq)
+            print("\t\tfound #%d bdd instances for %s)" % (len(queue), name))
+            # for bdd in self.actions[name]:
+            #     self.dump_dot(bdd, name+".dot")
+            # assert(0)
+
     def build_axioms(self):
         self.axiom = self.converter.typeok
         if axiom_formula(self) != TRUE():
@@ -196,7 +616,8 @@ class FR(object):
                     bddn = self.get_bdd(n)
                 self.natoms[n] = bddn
 #                 print("adding nex: %s with bdd %s" % (n, bddn))
-    
+
+
     def add_bddSupport(self, bdd, support):
         ps = self.ddmanager.Support(bdd)
         psA = repycudd.IntArray(self.converter.numvars)
@@ -268,14 +689,15 @@ class FR(object):
             if atom in restricted:
                 self.espresso_head.append(atom)
                 abvars.remove(var)
-        
+
         for atom in self.espresso_head:
-            str_head += pretty_serialize(atom).replace(" ", "") + " "
+            str_head += pretty_print_str(atom).replace(" ", "") + " "
         fprint(".i %d" % len(self.espresso_head))
         fprint(".o 1")
         fprint(str_head)
         fprint(".ob out")
-        fprint(".phase 0")
+        if common.gopts.mode == "frpo":
+            fprint(".phase 0")
         abcube = self.converter.cube_from_var_list(list(abvars))
 #         bddnew = bdd
         bddnew = self.ddmanager.ExistAbstract(bdd, abcube)
@@ -302,7 +724,7 @@ class FR(object):
         global outF
         name = "%s/espresso_in" % (common.gopts.out)
         self.print_espresso(bdd, restricted, name)
-        cmd = "exec ./utils/espresso/espresso.linux"
+        cmd = "exec ./espresso/bin/espresso"
         if mode == "exact":
             cmd += " -D exact -o kiss %s.pla" % name
             eprint("\t(running espresso in exact mode)")
@@ -363,7 +785,36 @@ class FR(object):
             assert(0)
         
         return newCubes
-    
+
+    def read_cubes(self, fileName):
+        with open(fileName) as f:
+            lines = [line.rstrip('\n') for line in f]
+            newCubes = []
+
+            for idx, line in enumerate(lines):
+                if len(line) < len(self.espresso_head):
+                    continue
+                if line.startswith("//") or line.startswith("."):
+                    continue
+                cubeLit = []
+                cubeMap = {}
+                for i in range(len(self.espresso_head)):
+                    atom = self.espresso_head[i]
+                    val = line[i]
+                    if val == "0":
+                        cubeMap[atom] = 0
+                        cubeLit.append(Not(atom))
+                    elif val == "1":
+                        cubeMap[atom] = 1
+                        cubeLit.append(atom)
+                    elif val == "-" or val == "x":
+                        pass
+                    else:
+                        raise Exception("Unexpected value in clause file at line %d: %s" % (idx+1, line))
+                cube = And(cubeLit) if len(cubeLit) != 0 else TRUE()
+                newCubes.append((cube, cubeMap, line))
+        return newCubes
+
     def bdd2atoms(self, bdd, atomset=None):
         psA = repycudd.IntArray(self.converter.numvars)
         self.ddmanager.BddToCubeArray(bdd, psA)
@@ -425,21 +876,23 @@ class FR(object):
             cubes.append(cubeNew)
         return cubes
     
-    def dump_dot(self, bdd):
+    def dump_dot(self, bdd, fileName="out.dot"):
         add = self.ddmanager.BddToAdd(bdd)
-        self.ddmanager.DumpDot(add)
-        
+        self.ddmanager.DumpDot(add)        
+        name = "%s/%s" % (common.gopts.out, fileName)
+        os.rename("out.dot", name)
+
         idx2atom = {}
         for idx in range(self.numvars):
             var = self.converter.idx2var[idx]
             atom = self.converter.var2atom[var]
             k = "\" %d \"" % idx
             idx2atom[k] = "\" %s \"" % pretty_serialize(atom)
-        inF = open('out.dot', 'r')
+        inF = open(name, 'r')
         str_dot = inF.read()
         inF.close()
         global outF
-        outF = open("out.dot", "w")
+        outF = open(name, "w")
         for k, v in idx2atom.items():
             str_dot = str_dot.replace(k, v)
         fprint(str_dot)
@@ -472,7 +925,8 @@ class FR(object):
                 arg = f.arg(idx)
                 if not arg.is_enum_constant():
                     instantiated = False
-                    dom = [Enum(d, paramt) for d in paramt.domain]
+                    dom = self.system._enumsorts[paramt]
+                    # dom = [Enum(d, paramt) for d in paramt.domain]
                     for d in reversed(dom):
                         subs = {}
                         subs[arg] = d
@@ -485,7 +939,8 @@ class FR(object):
             if ft.is_function_type():
                 rt = ft.return_type
             if rt.is_enum_type():
-                dom = [Enum(d, rt) for d in rt.domain]
+                dom = self.system._enumsorts[rt]
+                # dom = [Enum(d, rt) for d in rt.domain]
                 for d in dom:
                     eq = EqualsOrIff(f, d)
                     if eq not in fi:
@@ -545,7 +1000,7 @@ class FR(object):
                 self.pvars.add(var)
 #                 self.add_bddSupport(bdd, self.pvars)
                 print("adding pre: %s <-> %s := %d" % (pretty_serialize(atom), var, bdd.NodeReadIndex()))
-                
+
                 if atom == natom:
                     self.gatoms[atom] = bdd
                     
@@ -553,7 +1008,7 @@ class FR(object):
                 self.natoms[natom] = bdd
                 var = self.converter.atom2var[natom]
                 self.nvars.add(var)
-#                 print("adding nex: %s <-> %s := %d" % (natom, var, bdd.NodeReadIndex()))
+                print("adding nex: %s <-> %s := %d" % (natom, var, bdd.NodeReadIndex()))
                 
 #                 self.add_bddSupport(bdd, self.nvars)
         eprint("\t(#%d atoms with #%d variables)" % (len(self.atoms), self.converter.numvars))
@@ -567,7 +1022,7 @@ class FR(object):
         self.print_atoms()
         self.converter.pnset = True
         self.numvars = self.converter.numvars
-    
+
     def print_atoms(self):
         for i in range(self.converter.numvars):
             var = self.converter.idx2var[i]
@@ -650,12 +1105,34 @@ class FR(object):
         if bddC != self.ddmanager.ReadLogicZero():
             print("-- Finite check: violated --")
 #             bddC = self.ddmanager.ExistAbstract(bddC, self.projPre)
-            self.dump_dot(bddC)
+            self.dump_dot(bddC, "error.dot")
             assert(0)
         else:
             print("-- Finite check: safe --")
-    
+
+    def is_allowed_atom(self, atom, s):
+        if self.quorums == "symmetric" and self.system.is_quorum_symbol(s):
+            print("Atom %s is not allowed" % pretty_serialize(atom))
+            return False
+#         if s in self.system.curr._definitionMap:
+#             print("Atom %s is not allowed" % pretty_serialize(atom))
+#             return False
+#         print("Atom %s of type %s is allowed" % (pretty_serialize(atom), pretty_serialize(s)))
+        return True
+
+    def filter_atoms(self, atoms):
+        result = {}
+        for atom in atoms:
+            s = atom
+            if atom.is_function_application():
+                s = atom.function_name()
+            if self.is_allowed_atom(atom, s):
+                result[atom] = s
+        return result
+
     def execute(self):
+        global outF
+
         """Forward Reachability using BDDs."""
         prop = prop_formula(self)
         print("\nChecking property %s...\n" % prop)
@@ -671,13 +1148,52 @@ class FR(object):
                 break
         
         self.initialize_atoms()
+
+        if (common.gopts.mode == "fr-qi"):
+            restricted = self.filter_atoms(self.patoms)
+
+            qfClauseFile = common.gopts.qi
+            if not os.path.isfile(qfClauseFile):
+                raise Exception("Unable to find clause file: %s" % qfClauseFile)
+
+            dummyPla = "%s/header" % common.gopts.out
+            dummyBdd = self.formula2bdd(TRUE())
+            self.print_espresso(dummyBdd, restricted, dummyPla)
+
+            qfCubes = self.read_cubes(qfClauseFile)
+
+            inputFileName = os.path.splitext(os.path.basename(qfClauseFile))[0]
+            outName = "%s/%s_result.txt" % (common.gopts.out, inputFileName)
+            outF = open(outName, "w")
+
+            result = []
+            for cube, cubeMap, line in qfCubes:
+                print("%s -> %s" % (line, pretty_print_str(cube)))
+                cubesOut = symmetry_cube(self, cube, 0, False)
+                assert(len(cubesOut) == 1)
+                qCube, _= cubesOut[0]
+                result.append((line, Not(cube), Not(qCube)))
+
+            for line, clause, qClause in result:
+                numF, numE, numL = count_quantifiers_and_literals(qClause)
+                fprint("->")
+                fprint("\tpla:\t%s" % line)
+                fprint("\tquantifier-free:\t%s" % pretty_print_str(clause))
+                fprint("\tquantified:\t%s" % pretty_print_str(qClause))
+                fprint("\tnum-forall:\t%d" % numF)
+                fprint("\tnum-exists:\t%d" % numE)
+                fprint("\tnum-lits:\t%d" % numL)
+            exit(0)
+
+
+
         
         eprint(time_str(), "(building bdds)")
         bddI = self.formula2bdd(init_formula(self))
-#         pathCount = bddI.CountPathsToNonZero()
-#         print("Found %d paths in init" % pathCount)
-#         self.dump_dot(bddI)
-#         assert(0)
+        # pathCount = bddI.CountPathsToNonZero()
+        # print("Found %d paths in init" % pathCount)
+        # self.dump_dot(bddI, "init.dot")
+        # assert(0)
         
         self.build_actions()
         self.build_axioms()
@@ -726,6 +1242,7 @@ class FR(object):
         sources.append((initSrc, "init"))
         iteration = 0
         eprint("\t(running forward reachability)")
+        count = 0
         while (len(sources) != 0):
 #             print("#sources = %d" % len(sources))
             src, comment = sources.pop()
@@ -735,7 +1252,7 @@ class FR(object):
                 print("#%d Found no new states" % iteration)
                 continue
             else:
-                print("#%d Found #%d new states: %s" % (iteration, len(sources)+1, comment))
+                print("#%d Processing state from action %s" % (iteration, comment))
             self.check_safe(src)
                 
 #                 src = self.ddmanager.And(src, self.axiom)
@@ -755,14 +1272,15 @@ class FR(object):
                     if image == self.ddmanager.ReadLogicZero(): continue
                     nex = self.ddmanager.Or(nex, image)
                     done = True
-#                     print("found a state in %s" % action)
-#                         break
+                    # print("found a state in %s" % action)
+                    count += 1
                 if done:
                     destinations.append((nex, action))
             
             for dest, comment in destinations:
                 sources.append((dest, comment))
                 totalR = self.ddmanager.Or(totalR, dest)
+            print("#%d Found #%d new transitions" % (iteration, len(destinations)))
 
 #         eprint("\t(found total #%d paths)" % totalPathCount)
 #         print("\t(found total #%d paths)" % totalPathCount)
@@ -784,7 +1302,7 @@ class FR(object):
             projCustom = self.converter.cube_from_var_list(proj_vars)
             totalR = self.ddmanager.ExistAbstract(totalR, projCustom)
         
-        self.dump_dot(totalR)
+        self.dump_dot(totalR, common.gopts.name+"_R.dot")
         
 #         self.experiment(totalR)
         
@@ -792,6 +1310,16 @@ class FR(object):
         eprint("\t(forward reachability done)")
         print("\t(forward reachability done)")
         self.check_safe(totalR)
+
+        if common.gopts.mode == "fr-pla":
+            restricted = self.filter_atoms(self.patoms)
+
+            plaName = "%s/%s_R" % (common.gopts.out, common.gopts.name)
+            self.print_espresso(totalR, restricted, plaName)
+            eprint("\t(printed R in file %s.pla)" % plaName)
+            print("\t(printed R in file %s.pla)" % plaName)
+            exit(0)
+
         
         notCubes_fast = self.execute_espresso(totalR, self.patoms, "fast")
         notCubes = notCubes_fast
@@ -827,8 +1355,9 @@ def forwardReach(fname):
     
     read_problem(p, fname)
     print("\t(running: frpo)")
-    
-    set_axiom_formula(p)
+
+    set_problem(p)
+    system.gen = "fe"
 
     if len(p.system.curr._infers) != 0:
         print()

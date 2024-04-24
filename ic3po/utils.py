@@ -276,6 +276,43 @@ def count_quantifiers(formula, pol=True, inF=0, inE=0):
         outF, outE = count_quantifiers(formula.arg(1), not pol, outF, outE)
     return (outF, outE)
 
+def count_quantifiers_and_literals(formula, pol=True, inF=0, inE=0, inL=0):
+    outF = inF
+    outE = inE
+    outL = inL
+    if formula.is_not():
+        outF, outE, outL = count_quantifiers_and_literals(formula.arg(0), not pol, outF, outE, outL)
+        # print("formula: %s %s %d %d %d" % (formula, pol, outF-inF, outE-inE, outL-inL))
+        return (outF, outE, outL)
+    if formula.is_implies():
+        outF, outE, outL = count_quantifiers_and_literals(formula.arg(0), not pol, outF, outE, outL)
+        outF, outE, outL = count_quantifiers_and_literals(formula.arg(1), pol, outF, outE, outL)
+        # print("formula: %s %s %d %d %d" % (formula, pol, outF-inF, outE-inE, outL-inL))
+        return (outF, outE, outL)
+    is_e = formula.is_exists()
+    is_a = formula.is_forall()
+    if (is_e and pol) or (is_a and not pol):
+        qvars = formula.quantifier_vars()
+        outE += len(qvars)
+        outF, outE, outL = count_quantifiers_and_literals(formula.arg(0), pol, outF, outE, outL)
+        # print("formula: %s %s %d %d %d" % (formula, pol, outF-inF, outE-inE, outL-inL))
+        return (outF, outE, outL)
+    if (is_e and not pol) or (is_a and pol):
+        qvars = formula.quantifier_vars()
+        outF += len(qvars)
+        outF, outE, outL = count_quantifiers_and_literals(formula.arg(0), pol, outF, outE, outL)
+        # print("formula: %s %s %d %d %d" % (formula, pol, outF-inF, outE-inE, outL-inL))
+        return (outF, outE, outL)
+    if formula.is_and() or formula.is_or():
+        for arg in formula.args():
+            outF, outE, outL = count_quantifiers_and_literals(arg, pol, outF, outE, outL)
+    elif formula.is_true() or formula.is_false():
+        pass
+    else:
+        outL += 1
+    # print("formula: %s %s %d %d %d" % (formula, pol, outF-inF, outE-inE, outL-inL))
+    return (outF, outE, outL)
+
 def count_and(formula):
     f = And(formula)
     flat = flatten_and(f)

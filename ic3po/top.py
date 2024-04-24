@@ -33,6 +33,7 @@ DEFAULT_FINV=0
 DEFAULT_SIZE="default"
 DEFAULT_RANGEBOOST=1
 DEFAULT_CTI=0
+DEFAULT_QI="-"
 
 header="""
 ---
@@ -69,6 +70,7 @@ def getopts(header):
     p.add_argument('--size', help='finite size (, separated)', type=str, default=DEFAULT_SIZE)
     p.add_argument('--rb', help='use 1 to enable RangeBoost (default: %r)' % DEFAULT_RANGEBOOST, type=int, default=DEFAULT_RANGEBOOST)
     p.add_argument('--cti', help='use 1 to enable CTI printing (default: %r)' % DEFAULT_CTI, type=int, default=DEFAULT_CTI)
+    p.add_argument('--qi', help='<clause-file> (default: %s)' % DEFAULT_QI, type=str, default=DEFAULT_QI)
     p.add_argument('-v', '--verbosity', help='verbosity level (default: %r)' % DEFAULT_VERBOSITY, type=int, default=DEFAULT_VERBOSITY)
     args, leftovers = p.parse_known_args()
     return args, p.parse_args()
@@ -101,7 +103,7 @@ def main():
     if common.gopts.init != DEFAULT_INITSZ:
         eprint("\t(init size: %s)" % common.gopts.init)
     
-    if common.gopts.mode == "frpo":
+    if common.gopts.mode.startswith("fr"):
         from fr import forwardReach
         system = forwardReach(common.gopts.file)
         backwardReach(common.gopts.file, system)
