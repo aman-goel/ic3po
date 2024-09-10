@@ -365,8 +365,8 @@ def symmetry_cube(self, cube, fIdx, reducePremise, dest=None):
             fullsorts.append([enumsort, qvar])
 
     eqMap = dict()
-    if common.gopts.const > 0:
-        eqMap, cubeSet, antecedent, fullsorts = self.propagate_eq(cubeSet, antecedent, ivars, qvars, fullsorts)
+    # if common.gopts.const > 0:
+    #     eqMap, cubeSet, antecedent, fullsorts = self.propagate_eq(cubeSet, antecedent, ivars, qvars, fullsorts)
 
     self.print_fullsorts(fullsorts)
     
